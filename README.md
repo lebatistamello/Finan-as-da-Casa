@@ -36,34 +36,47 @@ Drive), categoriza os lançamentos e grava os totais na planilha
    confirmadas contra a estrutura real da planilha (aba `"2026"`, pasta
    `Faturas do Cartão da Casa`); só reajuste se a estrutura mudar.
 
-4. Teste manualmente com um PDF local antes de automatizar:
+4. (Opcional, se quiser testar localmente primeiro) Com o `credentials.json`
+   na raiz do projeto, teste com um PDF local:
 
    ```bash
    python atualizar_planilha_financas.py --pdf "fatura_teste.pdf" --mes agosto
    ```
 
-5. Teste o modo automático (lê a pasta do Drive) em modo simulação:
+   Depois teste o modo automático (lê a pasta do Drive) em modo simulação:
 
    ```bash
    python atualizar_planilha_financas.py --mes agosto
    ```
 
-6. Quando validado, use `--escrever` para gravar de verdade na planilha e
-   marcar os PDFs como processados no Drive:
+   Quando validado, `--escrever` grava de verdade e marca os PDFs como
+   processados no Drive:
 
    ```bash
    python atualizar_planilha_financas.py --mes agosto --escrever
    ```
 
-7. Para rodar sozinho, sem depender de ninguém passar `--mes` na mão, crie
-   uma Routine (claude.ai/code/routines ou `/schedule` no Claude Code CLI)
-   apontando para este repositório, na frequência desejada (semanal / a
-   cada 10 dias). Quando `--mes` é omitido o script usa automaticamente o
-   mês corrente (`mes_atual()`), então a Routine pode chamar apenas:
+5. **Automação via GitHub Actions** (roda sozinha, sem depender de
+   nenhum computador ligado — já configurado em
+   `.github/workflows/atualizar-planilha.yml`):
 
-   ```bash
-   python atualizar_planilha_financas.py --escrever
-   ```
+   - No GitHub, vá em **Settings → Secrets and variables → Actions →
+     New repository secret**
+   - Nome: `GOOGLE_CREDENTIALS_JSON`
+   - Valor: cole o conteúdo inteiro do arquivo `credentials.json` baixado
+     no passo 3
+   - **Add secret**
+
+   O workflow roda automaticamente toda segunda-feira às 09:00 (horário
+   de Brasília) usando `--escrever`, e usa `mes_atual()` para saber qual
+   mês gravar — não precisa passar `--mes` na mão. Ajuste o `cron` no
+   arquivo do workflow se quiser outra frequência (ex.: conforme a data
+   de fechamento da fatura).
+
+   Para testar sem esperar a segunda-feira: aba **Actions** do
+   repositório → **Atualizar planilha com fatura do cartão** →
+   **Run workflow**. Deixe a opção "Gravar de verdade" desmarcada pra
+   rodar em modo simulação primeiro.
 
 ## Aviso
 

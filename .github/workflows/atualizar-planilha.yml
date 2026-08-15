@@ -1,0 +1,41 @@
+name: Atualizar planilha com fatura do cartão
+
+on:
+  schedule:
+    # Toda segunda-feira, 12:00 UTC (09:00 horário de Brasília).
+    # Ajuste conforme a data de fechamento da fatura do cartão.
+    - cron: '0 12 * * 1'
+  workflow_dispatch:
+    inputs:
+      escrever:
+        description: 'Gravar de verdade na planilha (desmarcado = só simula)'
+        type: boolean
+        default: false
+
+jobs:
+  atualizar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Instalar dependências
+        run: pip install -r requirements.txt
+
+      - name: Rodar automação
+        env:
+          GOOGLE_CREDENTIALS_JSON: ${{ secrets.GOOGLE_CREDENTIALS_JSON }}
+        run: |
+          echo "$GOOGLE_CREDENTIALS_JSON" > credentials.json
+          if [ "${{ github.event_name }}" = "schedule" ] || [ "${{ inputs.escrever }}" = "true" ]; then
+            python atualizar_planilha_financas.py --escrever
+          else
+            python atualizar_planilha_financas.py
+          fi
+
+      - name: Remover credenciais
+        if: always()
+        run: rm -f credentials.json
