@@ -62,16 +62,19 @@ from googleapiclient.http import MediaIoBaseDownload
 # CONFIGURAÇÃO — ajuste antes de rodar
 # ============================================================
 
-# ID da planilha "Finanças da Família 2026".
+# ID da planilha "Finanças da Família 2026" (versão nativa Google Sheets,
+# convertida a partir do .xlsx original em 15/08/2026 — o Sheets API não
+# funciona sobre arquivos .xlsx "modo compatibilidade").
 # É o trecho entre /d/ e /edit na URL do Google Sheets.
-SPREADSHEET_ID = "17NNhMLlCq1wu0oSQlqGiqeVfl9chhbRg"
+SPREADSHEET_ID = "1y-HIz6irM70XFt9cJVMK93_flaC_mcgl-0sHNeivObA"
 
-# ID da pasta do Google Drive onde as faturas em PDF são salvas
-# (pasta "Finanças da Casa", no Drive da conta mellmucomunicacao@gmail.com)
-DRIVE_FOLDER_ID = "16f_E5DwzUScrcZqR1eLu-i9Dfx9c52Yi"
+# ID da subpasta do Google Drive onde as faturas em PDF são salvas
+# (pasta "Faturas do Cartão da Casa", dentro de "Finanças da Casa",
+# no Drive da conta mellmucomunicacao@gmail.com)
+DRIVE_FOLDER_ID = "1wnZ0sS_UHeuutQh3wVfDKFc81K9vubAP"
 
-# Nome da aba (verifique o nome exato da aba na planilha de vocês)
-SHEET_NAME = "Planilha1"  # <-- AJUSTAR para o nome real da aba
+# Nome da aba, confirmado em 15/08/2026 na planilha nativa
+SHEET_NAME = "2026"
 
 # Arquivo de credenciais da service account (Sheets API + Drive API)
 CREDENTIALS_FILE = "credentials.json"

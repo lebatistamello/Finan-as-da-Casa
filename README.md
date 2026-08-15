@@ -12,21 +12,29 @@ Drive), categoriza os lançamentos e grava os totais na planilha
    pip install -r requirements.txt
    ```
 
-2. Configure uma Service Account no [Google Cloud Console](https://console.cloud.google.com):
+2. **Importante:** a planilha "Finanças da Família 2026" precisa estar em
+   formato **nativo do Google Sheets**, não `.xlsx`. Se o arquivo foi
+   criado por upload de um Excel, abra-o no Drive e use
+   **Arquivo → Salvar como Planilhas Google** — isso cria uma cópia nova
+   (com URL diferente) que a API do Sheets consegue manipular; arquivos
+   `.xlsx` em "modo compatibilidade" não são acessíveis pela API.
+
+3. Configure uma Service Account no [Google Cloud Console](https://console.cloud.google.com):
    - Crie um projeto (ou use um existente)
    - Ative a **Google Sheets API** e a **Google Drive API**
    - Crie uma Service Account, gere uma chave JSON e salve como
      `credentials.json` na raiz do projeto (esse arquivo **nunca** deve ir
      para o GitHub em texto puro — o `.gitignore` já o exclui; use GitHub
      Secrets para automações na nuvem)
-   - Compartilhe a planilha "Finanças da Família 2026" e a pasta de
-     faturas no Drive com o e-mail da service account
-     (algo como `xxxx@yyyy.iam.gserviceaccount.com`), dando permissão de
-     Editor nos dois
+   - Compartilhe a planilha "Finanças da Família 2026" (a versão nativa
+     do passo 2) e a pasta de faturas no Drive com o e-mail da service
+     account (algo como `xxxx@yyyy.iam.gserviceaccount.com`), dando
+     permissão de Editor nos dois
 
-3. Ajuste as constantes no topo de `atualizar_planilha_financas.py`
-   (`SPREADSHEET_ID`, `DRIVE_FOLDER_ID`, `SHEET_NAME`, `COLUNA_DO_MES`,
-   `LINHA_DO_ITEM`) para bater com a estrutura real da planilha.
+   As constantes `SPREADSHEET_ID`, `DRIVE_FOLDER_ID` e `SHEET_NAME` no
+   topo de `atualizar_planilha_financas.py` já estão preenchidas e
+   confirmadas contra a estrutura real da planilha (aba `"2026"`, pasta
+   `Faturas do Cartão da Casa`); só reajuste se a estrutura mudar.
 
 4. Teste manualmente com um PDF local antes de automatizar:
 
