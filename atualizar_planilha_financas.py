@@ -1,0 +1,369 @@
+"""
+Automação: Fatura do cartão (PDF, salva numa pasta do Google Drive) ->
+categorização -> escrita na planilha "Finanças da Família 2026" (Google Sheets).
+
+COMO USAR (via Claude Code):
+1. Peça ao Claude Code para revisar este script e instalar as dependências:
+   pip install pdfplumber gspread google-auth google-auth-oauthlib \
+               google-api-python-client
+
+2. Configure uma Service Account no Google Cloud Console:
+   - Crie um projeto (ou use um existente) em console.cloud.google.com
+   - Ative a "Google Sheets API" e a "Google Drive API"
+   - Crie uma Service Account, gere uma chave JSON, salve como credentials.json
+     (NUNCA suba esse arquivo pro GitHub em texto puro — use GitHub Secrets)
+   - Compartilhe a planilha "Finanças da Família 2026" COM a pasta de
+     faturas no Drive com o e-mail da service account
+     (algo como xxxx@yyyy.iam.gserviceaccount.com), dando permissão de Editor
+     nos dois
+
+3. Ajuste as constantes no topo do script (SPREADSHEET_ID, DRIVE_FOLDER_ID,
+   SHEET_NAME, etc.)
+
+4. Teste manualmente com um PDF local antes de automatizar:
+   python atualizar_planilha_financas.py --pdf "fatura_teste.pdf" --mes agosto
+
+5. Teste o modo automático (lê a pasta do Drive) em modo simulação:
+   python atualizar_planilha_financas.py --mes agosto
+
+6. Quando validado, use --escrever para gravar de verdade e marcar os
+   PDFs como processados:
+   python atualizar_planilha_financas.py --mes agosto --escrever
+
+7. Peça ao Claude Code para criar uma Routine (claude.ai/code/routines ou
+   /schedule no CLI) apontando pra esse repositório, rodando esse comando
+   na frequência que vocês quiserem (semanal / a cada 10 dias) — isso roda
+   na nuvem da Anthropic, sem depender de nenhum computador ligado.
+   Repare que a Routine vai precisar saber QUAL mês gravar automaticamente
+   (hoje o --mes é manual) — vale pedir ao Claude Code pra trocar isso por
+   "mês atual" calculado automaticamente pela data de execução.
+
+IMPORTANTE: a extração de PDF e as regras de categorização abaixo são um
+PONTO DE PARTIDA baseado nos extratos do Ourocard Platinum Estilo (BB)
+analisados nesta conversa. Provavelmente vai precisar de ajustes finos
+lançamento a lançamento -- é normal, e o Claude Code pode iterar isso
+junto com você olhando saídas reais.
+"""
+
+import argparse
+import io
+import re
+import sys
+from datetime import date
+from pathlib import Path
+
+import pdfplumber
+import gspread
+from google.oauth2.service_account import Credentials
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaIoBaseDownload
+
+# ============================================================
+# CONFIGURAÇÃO — ajuste antes de rodar
+# ============================================================
+
+# ID da planilha "Finanças da Família 2026".
+# É o trecho entre /d/ e /edit na URL do Google Sheets.
+SPREADSHEET_ID = "17NNhMLlCq1wu0oSQlqGiqeVfl9chhbRg"
+
+# ID da pasta do Google Drive onde as faturas em PDF são salvas
+# (pasta "Finanças da Casa", no Drive da conta mellmucomunicacao@gmail.com)
+DRIVE_FOLDER_ID = "16f_E5DwzUScrcZqR1eLu-i9Dfx9c52Yi"
+
+# Nome da aba (verifique o nome exato da aba na planilha de vocês)
+SHEET_NAME = "Planilha1"  # <-- AJUSTAR para o nome real da aba
+
+# Arquivo de credenciais da service account (Sheets API + Drive API)
+CREDENTIALS_FILE = "credentials.json"
+
+# Mapeamento mês -> letra da coluna na planilha (ajuste conforme a
+# estrutura real: veja a linha "RECEBIMENTOS" / "DESPESAS FIXAS" da
+# planilha para confirmar em qual coluna cada mês cai)
+COLUNA_DO_MES = {
+    "janeiro": "C", "fevereiro": "D", "marco": "E", "abril": "F",
+    "maio": "G", "junho": "H", "julho": "I", "agosto": "J",
+    "setembro": "K", "outubro": "L", "novembro": "M", "dezembro": "N",
+}
+
+# Linha de cada item na planilha. Contado a partir do conteúdo real lido em
+# 15/08/2026 (a aba tem, nessa ordem: cabeçalho/objetivos linhas 1-5,
+# "O que tenho" 6-13, "O que devo" 14-17, "RECEBIMENTOS" 18-23,
+# "DESPESAS FIXAS" a partir da 24). Ainda assim, CONFIRA VISUALMENTE na
+# planilha antes de rodar com --escrever pela primeira vez — linhas em
+# branco extras que o Drive não exponha no texto podem deslocar isso.
+LINHA_DO_ITEM = {
+    "Energia elétrica": 26,
+    "Água": 27,
+    "Gás e Lenha": 28,
+    "Internet": 29,
+    "Supermercado/feira": 30,
+    "Restaurantes/Deliverys": 31,
+    "Investimento/Manutenção Casa": 32,
+    "Limpeza (Casa e Pátio)": 33,
+    "IPTU parcelado 10x": 34,
+    "Plano de saúde": 36,
+    "Academia/Clube": 37,
+    "Farmácia/remédios": 38,
+    "Salão de beleza": 39,
+    "Atividades Luise": 41,
+    "Atividades Maitê": 42,
+    "Escola Maitê Marista": 43,
+    "Escola Luise Marista": 44,
+    "Gasolina CRV": 46,
+    "Estacionamento": 47,
+    "IPVA Cielo": 48,
+    "Seguro CRV": 49,
+    "Aplicativos/táxi": 50,
+    "Taxas": 52,
+    "Assinaturas": 53,
+    "PET": 54,
+    "Investimentos": 55,
+    "Mercado Livre": 58,
+    "Farmácia (dívida)": 59,
+    "Dafitti": 60,
+    "Adidas": 61,
+    "Outros": 62,
+    "Manutenções CRV": 63,
+    "Manutenção Cielo": 64,
+    "Multas de Trânsito": 67,
+    "Compras eventuais": 68,
+    "Férias/Viagens": 69,
+}
+
+# ============================================================
+# REGRAS DE CATEGORIZAÇÃO
+# Cada linha de item recebe uma lista de palavras-chave (case-insensitive,
+# substring match) que identificam lançamentos daquele tipo no extrato.
+# Ajuste/expanda conforme forem aparecendo comerciantes novos.
+# ============================================================
+
+REGRAS = {
+    "Supermercado/feira": ["SUPER TCHE", "ZAFFARI", "BISTEK", "SAMS CLUB",
+                            "MERCADINHO", "BANCA 43", "HORTIFRUTI", "FRUTEIRA"],
+    "Restaurantes/Deliverys": ["IFOOD", "RESTAURANT", "PIZZ", "LANCHONETE",
+                                "BURGER", "BISTRO", "CAMARADA", "CUNHA E NOSCHANG"],
+    "Farmácia/remédios": ["PANVEL", "DROGARIA", "FARMAC"],
+    "Academia/Clube": ["ACADEMIA", "AABB"],
+    "Salão de beleza": ["ESMALTERIA", "ESTETICA", "SALAO"],
+    "Gasolina CRV": ["COMBUSTIVE", "POSTO ", "AUTO POSTO", "ABASTECEDORA",
+                      "GAS ZONA SUL", "GASZONASUL"],
+    "Estacionamento": ["ESTACIONAMENTO", "HORA PARK", "ALLPARK"],
+    "Aplicativos/táxi": ["UBER", "99*", "99 "],
+    "Assinaturas": ["SPOTIFY", "NETFLIX", "AMAZON PRIME", "GLOBO PREMIER",
+                     "ICLOUD", "YOUTUBE"],
+    "PET": ["PET ", "PETSHOP", "VETERINAR"],
+    "Escola Maitê Marista": ["ESCOLA MAITE", "MARISTA MAITE"],
+    "Escola Luise Marista": ["ESCOLA LUISE", "MARISTA LUISE"],
+    # Regras adicionais vão aparecendo conforme mais faturas forem processadas —
+    # peça ao Claude Code pra te ajudar a ir expandindo isso.
+}
+
+DEFAULT_ITEM = "Compras eventuais"  # cai aqui se nada bater
+
+MESES_PT = {
+    1: "janeiro", 2: "fevereiro", 3: "marco", 4: "abril", 5: "maio", 6: "junho",
+    7: "julho", 8: "agosto", 9: "setembro", 10: "outubro", 11: "novembro", 12: "dezembro",
+}
+
+
+def mes_atual() -> str:
+    """Retorna o mês corrente em português, no formato usado por COLUNA_DO_MES.
+    Usado pela Routine, que roda sozinha sem ninguém passando --mes na mão."""
+    return MESES_PT[date.today().month]
+
+# ============================================================
+# ACESSO AO GOOGLE DRIVE (pasta de faturas)
+# ============================================================
+
+def conectar_drive():
+    scopes = ["https://www.googleapis.com/auth/drive"]
+    creds = Credentials.from_service_account_file(CREDENTIALS_FILE, scopes=scopes)
+    return build("drive", "v3", credentials=creds)
+
+
+def listar_pdfs_novos(drive_service, folder_id: str):
+    """Lista PDFs na pasta que ainda não têm a propriedade 'processado=true'."""
+    query = (
+        f"'{folder_id}' in parents and mimeType='application/pdf' "
+        f"and trashed=false and not properties has {{key='processado' and value='true'}}"
+    )
+    resultado = drive_service.files().list(
+        q=query, fields="files(id, name)", pageSize=100
+    ).execute()
+    return resultado.get("files", [])
+
+
+def baixar_pdf_drive(drive_service, file_id: str) -> bytes:
+    request = drive_service.files().get_media(fileId=file_id)
+    buffer = io.BytesIO()
+    downloader = MediaIoBaseDownload(buffer, request)
+    done = False
+    while not done:
+        _, done = downloader.next_chunk()
+    buffer.seek(0)
+    return buffer.read()
+
+
+def marcar_como_processado(drive_service, file_id: str):
+    drive_service.files().update(
+        fileId=file_id,
+        body={"properties": {"processado": "true"}},
+    ).execute()
+
+
+# ============================================================
+# EXTRAÇÃO DO PDF
+# ============================================================
+
+def extrair_lancamentos_de_bytes(pdf_bytes: bytes):
+    """Mesma extração de extrair_lancamentos, mas a partir de bytes em memória
+    (útil quando o PDF vem direto do Drive, sem salvar em disco)."""
+    lancamentos = []
+    linha_regex = re.compile(
+        r"^\s*\d{2}/\d{2}\s+(.+?)\s+(?:BR|[A-Z]{2})?\s*R?\$?\s*([\d.,]+)\s*$"
+    )
+    with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
+        for page in pdf.pages:
+            text = page.extract_text() or ""
+            for line in text.split("\n"):
+                m = linha_regex.match(line)
+                if not m:
+                    continue
+                desc = m.group(1).strip()
+                valor_str = m.group(2).replace(".", "").replace(",", ".")
+                try:
+                    valor = float(valor_str)
+                except ValueError:
+                    continue
+                lancamentos.append((desc, valor))
+    return lancamentos
+
+
+def extrair_lancamentos(pdf_path: str):
+    """Extrai (descricao, valor) de todas as linhas de lançamento de um PDF
+    local. Mantido para testes manuais com --pdf; o fluxo automático usa
+    extrair_lancamentos_de_bytes() a partir do Drive."""
+    with open(pdf_path, "rb") as f:
+        return extrair_lancamentos_de_bytes(f.read())
+
+
+def categorizar(descricao: str) -> str:
+    desc_upper = descricao.upper()
+    for item, palavras in REGRAS.items():
+        if any(p in desc_upper for p in palavras):
+            return item
+    return DEFAULT_ITEM
+
+
+def somar_por_item(lancamentos):
+    totais = {}
+    nao_categorizados = []
+    for desc, valor in lancamentos:
+        item = categorizar(desc)
+        totais[item] = totais.get(item, 0.0) + valor
+        if item == DEFAULT_ITEM:
+            nao_categorizados.append((desc, valor))
+    return totais, nao_categorizados
+
+
+# ============================================================
+# ESCRITA NA PLANILHA
+# ============================================================
+
+def conectar_planilha():
+    scopes = ["https://www.googleapis.com/auth/spreadsheets"]
+    creds = Credentials.from_service_account_file(CREDENTIALS_FILE, scopes=scopes)
+    client = gspread.authorize(creds)
+    return client.open_by_key(SPREADSHEET_ID).worksheet(SHEET_NAME)
+
+def escrever_totais(ws, mes: str, totais: dict, dry_run: bool = True):
+    coluna = COLUNA_DO_MES[mes]
+    updates = []
+    for item, valor in totais.items():
+        linha = LINHA_DO_ITEM.get(item)
+        if linha is None:
+            print(f"[aviso] item '{item}' sem linha mapeada — pulei")
+            continue
+        cell = f"{coluna}{linha}"
+        updates.append((cell, round(valor, 2)))
+
+    print(f"\n{'[SIMULAÇÃO] ' if dry_run else ''}Valores que {'seriam' if dry_run else 'foram'} escritos (coluna {coluna}):")
+    for cell, valor in updates:
+        print(f"  {cell} = R$ {valor:,.2f}")
+
+    if not dry_run:
+        for cell, valor in updates:
+            ws.update_acell(cell, valor)
+        print("\nPlanilha atualizada.")
+    else:
+        print("\n(Rodando em modo simulação — use --escrever para gravar de verdade)")
+
+
+# ============================================================
+# MAIN
+# ============================================================
+
+def main():
+    parser = argparse.ArgumentParser(description="Processa fatura(s) do cartão e atualiza a planilha oficial.")
+    parser.add_argument("--pdf", help="Caminho de um PDF local (modo manual/teste)")
+    parser.add_argument("--mes", choices=list(COLUNA_DO_MES.keys()), default=None,
+                         help="Mês de referência (ex: agosto). Se omitido, usa o mês atual "
+                              "automaticamente — é assim que a Routine vai rodar sozinha.")
+    parser.add_argument("--escrever", action="store_true",
+                         help="Grava de verdade na planilha (padrão: só simula)")
+    args = parser.parse_args()
+
+    mes = args.mes or mes_atual()
+    print(f"Mês de referência: {mes}" + (" (detectado automaticamente)" if not args.mes else ""))
+
+    todos_lancamentos = []
+
+    if args.pdf:
+        # Modo manual: um PDF local, pra teste
+        pdf_path = Path(args.pdf)
+        if not pdf_path.exists():
+            sys.exit(f"Arquivo não encontrado: {pdf_path}")
+        print(f"Lendo {pdf_path.name} (local)...")
+        todos_lancamentos.extend(extrair_lancamentos(str(pdf_path)))
+        arquivos_para_marcar = []
+    else:
+        # Modo automático: varre a pasta do Drive por PDFs ainda não processados
+        drive = conectar_drive()
+        pdfs_novos = listar_pdfs_novos(drive, DRIVE_FOLDER_ID)
+        if not pdfs_novos:
+            print("Nenhuma fatura nova encontrada na pasta do Drive.")
+            return
+        print(f"{len(pdfs_novos)} fatura(s) nova(s) encontrada(s) na pasta do Drive:")
+        for f in pdfs_novos:
+            print(f"  - {f['name']}")
+            pdf_bytes = baixar_pdf_drive(drive, f["id"])
+            todos_lancamentos.extend(extrair_lancamentos_de_bytes(pdf_bytes))
+        arquivos_para_marcar = pdfs_novos
+
+    print(f"\n{len(todos_lancamentos)} lançamentos encontrados no total.")
+
+    totais, nao_categorizados = somar_por_item(todos_lancamentos)
+
+    print("\nTotais por item:")
+    for item, valor in sorted(totais.items(), key=lambda x: -x[1]):
+        print(f"  {item}: R$ {valor:,.2f}")
+
+    if nao_categorizados:
+        print(f"\n[atenção] {len(nao_categorizados)} lançamentos caíram em "
+              f"'{DEFAULT_ITEM}' por falta de regra — confira se fazem sentido:")
+        for desc, valor in nao_categorizados[:20]:
+            print(f"  - {desc}: R$ {valor:,.2f}")
+
+    ws = conectar_planilha()
+    escrever_totais(ws, mes, totais, dry_run=not args.escrever)
+
+    # Só marca os PDFs como processados se realmente gravou na planilha
+    if args.escrever and arquivos_para_marcar:
+        drive = conectar_drive()
+        for f in arquivos_para_marcar:
+            marcar_como_processado(drive, f["id"])
+        print(f"\n{len(arquivos_para_marcar)} arquivo(s) marcado(s) como processado(s) no Drive.")
+
+
+if __name__ == "__main__":
+    main()
