@@ -157,6 +157,8 @@ REGRAS = {
     "PET": ["PET ", "PETSHOP", "VETERINAR"],
     "Escola Maitê Marista": ["ESCOLA MAITE", "MARISTA MAITE"],
     "Escola Luise Marista": ["ESCOLA LUISE", "MARISTA LUISE"],
+    "Mercado Livre": ["MERCADOLIVRE", "MERCADO LIVRE", "MP*MELIMAIS", "MELIMAIS"],
+    "Taxas": ["TAXA", "IOF", "ANUIDADE"],
     # Regras adicionais vão aparecendo conforme mais faturas forem processadas —
     # peça ao Claude Code pra te ajudar a ir expandindo isso.
 }
