@@ -79,14 +79,18 @@ SHEET_NAME = "2026"
 # Arquivo de credenciais da service account (Sheets API + Drive API)
 CREDENTIALS_FILE = "credentials.json"
 
-# Mapeamento mês -> letra da coluna na planilha (ajuste conforme a
-# estrutura real: veja a linha "RECEBIMENTOS" / "DESPESAS FIXAS" da
-# planilha para confirmar em qual coluna cada mês cai)
+# Mapeamento mês -> letra da coluna na planilha. Corrigido em 16/08/2026:
+# a versão anterior (C..N) estava uma coluna adiantada — confirmado
+# contra o texto real do cabeçalho da linha "RECEBIMENTOS" (célula por
+# célula, via exportação CSV) e contra a linha "Depósito Lisandra"
+# (nunca escrita pelo script, preserva os valores originais do modelo).
+# Coluna N é o "budget" (orçamento previsto) de cada categoria.
 COLUNA_DO_MES = {
-    "janeiro": "C", "fevereiro": "D", "marco": "E", "abril": "F",
-    "maio": "G", "junho": "H", "julho": "I", "agosto": "J",
-    "setembro": "K", "outubro": "L", "novembro": "M", "dezembro": "N",
+    "janeiro": "B", "fevereiro": "C", "marco": "D", "abril": "E",
+    "maio": "F", "junho": "G", "julho": "H", "agosto": "I",
+    "setembro": "J", "outubro": "K", "novembro": "L", "dezembro": "M",
 }
+COLUNA_BUDGET = "N"
 
 # Linha de cada item na planilha. Contado a partir do conteúdo real lido em
 # 15/08/2026 (a aba tem, nessa ordem: cabeçalho/objetivos linhas 1-5,
