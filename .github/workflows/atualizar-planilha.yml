@@ -11,6 +11,10 @@ on:
         description: 'Gravar de verdade na planilha (desmarcado = só simula)'
         type: boolean
         default: false
+      resetar_processados:
+        description: 'Manutenção: desmarcar todos os PDFs da pasta como não processados (ignora "Gravar de verdade")'
+        type: boolean
+        default: false
 
 jobs:
   atualizar:
@@ -30,7 +34,9 @@ jobs:
           GOOGLE_CREDENTIALS_JSON: ${{ secrets.GOOGLE_CREDENTIALS_JSON }}
         run: |
           echo "$GOOGLE_CREDENTIALS_JSON" > credentials.json
-          if [ "${{ github.event_name }}" = "schedule" ] || [ "${{ inputs.escrever }}" = "true" ]; then
+          if [ "${{ inputs.resetar_processados }}" = "true" ]; then
+            python atualizar_planilha_financas.py --resetar-processados
+          elif [ "${{ github.event_name }}" = "schedule" ] || [ "${{ inputs.escrever }}" = "true" ]; then
             python atualizar_planilha_financas.py --escrever
           else
             python atualizar_planilha_financas.py

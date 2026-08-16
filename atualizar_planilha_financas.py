@@ -258,6 +258,25 @@ def marcar_como_processado(drive_service, file_id: str):
     ).execute()
 
 
+def listar_todos_pdfs(drive_service, folder_id: str):
+    """Lista TODOS os PDFs da pasta, processados ou não. Usado só por
+    --resetar-processados (a interface do Drive não permite editar essa
+    propriedade customizada na mão, então esse é o único jeito de desfazer
+    uma marcação errada)."""
+    query = f"'{folder_id}' in parents and mimeType='application/pdf' and trashed=false"
+    resultado = drive_service.files().list(
+        q=query, fields="files(id, name)", pageSize=100
+    ).execute()
+    return resultado.get("files", [])
+
+
+def desmarcar_processado(drive_service, file_id: str):
+    drive_service.files().update(
+        fileId=file_id,
+        body={"properties": {"processado": None}},
+    ).execute()
+
+
 # ============================================================
 # EXTRAÇÃO DO PDF
 # ============================================================
@@ -391,7 +410,22 @@ def main():
                               "as faturas encontradas na pasta.")
     parser.add_argument("--escrever", action="store_true",
                          help="Grava de verdade na planilha (padrão: só simula)")
+    parser.add_argument("--resetar-processados", action="store_true",
+                         help="Desmarca TODOS os PDFs da pasta como não processados (usado pra "
+                              "corrigir uma gravação errada e permitir reprocessar as mesmas "
+                              "faturas). Não mexe na planilha, só no Drive.")
     args = parser.parse_args()
+
+    if args.resetar_processados:
+        drive = conectar_drive()
+        pdfs = listar_todos_pdfs(drive, DRIVE_FOLDER_ID)
+        if not pdfs:
+            print("Nenhum PDF encontrado na pasta do Drive.")
+            return
+        for f in pdfs:
+            desmarcar_processado(drive, f["id"])
+            print(f"'{f['name']}' desmarcado como processado.")
+        return
 
     ws = conectar_planilha()
 
