@@ -1,0 +1,53 @@
+name: Atualizar painel de orçamento
+
+on:
+  schedule:
+    # Todo dia, 08:00 (horário de Brasília / 11:00 UTC)
+    - cron: '0 11 * * *'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Evita duas publicações no Pages rodando ao mesmo tempo
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  gerar-e-publicar:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Instalar dependências
+        run: pip install -r requirements.txt
+
+      - name: Gerar painel
+        env:
+          GOOGLE_CREDENTIALS_JSON: ${{ secrets.GOOGLE_CREDENTIALS_JSON }}
+        run: |
+          echo "$GOOGLE_CREDENTIALS_JSON" > credentials.json
+          python atualizar_planilha_financas.py --gerar-painel --painel-saida painel/index.html
+          rm -f credentials.json
+
+      - name: Configurar Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload do artefato do painel
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: painel
+
+      - name: Publicar no GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

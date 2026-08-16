@@ -78,6 +78,26 @@ Drive), categoriza os lançamentos e grava os totais na planilha
    **Run workflow**. Deixe a opção "Gravar de verdade" desmarcada pra
    rodar em modo simulação primeiro.
 
+6. **Painel do mês atual (mobile)** — uma página simples comparando o
+   gasto do mês corrente com o orçamento (coluna "budget" da planilha),
+   categoria por categoria, publicada automaticamente no GitHub Pages
+   (`.github/workflows/atualizar-painel.yml`):
+
+   - No GitHub: **Settings → Pages → Build and deployment → Source:
+     GitHub Actions** (configuração única, não precisa repetir)
+   - O workflow roda todo dia às 08:00 (horário de Brasília) e publica
+     em `https://<seu-usuário>.github.io/<repositório>/` — salve esse
+     link na tela inicial do celular
+   - **Atenção:** essa página fica pública na internet (sem senha, mas
+     ninguém acha sem o link exato); é assim que o GitHub Pages
+     funciona no plano gratuito
+   - Pra gerar localmente sem esperar o agendamento:
+     ```bash
+     python atualizar_planilha_financas.py --gerar-painel
+     ```
+     (gera `painel/index.html`; abra esse arquivo no navegador pra
+     conferir antes de publicar)
+
 ## Aviso
 
 A extração de PDF e as regras de categorização em `REGRAS` são um ponto de

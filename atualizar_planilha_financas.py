@@ -49,7 +49,7 @@ import argparse
 import io
 import re
 import sys
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 
 import pdfplumber
@@ -381,6 +381,108 @@ def escrever_totais(ws, mes: str, totais: dict, dry_run: bool = True):
 
 
 # ============================================================
+# PAINEL (mês atual x orçamento) — página HTML pra acompanhar pelo celular
+# ============================================================
+
+def parse_valor_br(texto) -> float:
+    """Converte 'R$ 3.000,00' / '396,90' / '' / None em float. Célula vazia
+    ou não numérica vira 0.0 (linha ainda sem orçamento/gasto definido)."""
+    texto = (texto or "").strip()
+    if not texto:
+        return 0.0
+    texto = texto.replace("R$", "").strip()
+    texto = texto.replace(".", "").replace(",", ".")
+    try:
+        return float(texto)
+    except ValueError:
+        return 0.0
+
+
+def fmt_brl(valor: float) -> str:
+    s = f"{valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    return f"R$ {s}"
+
+
+def gerar_painel_html(ws, mes: str) -> str:
+    """Lê o orçamento (coluna budget) e o gasto do mês atual (coluna do mês)
+    de cada categoria em LINHA_DO_ITEM e monta uma página HTML simples,
+    lado a lado, com a diferença (orçamento - gasto)."""
+    coluna_atual = COLUNA_DO_MES[mes]
+    linhas_html = []
+    total_budget = 0.0
+    total_atual = 0.0
+
+    for item, linha in LINHA_DO_ITEM.items():
+        budget = parse_valor_br(ws.acell(f"{COLUNA_BUDGET}{linha}").value)
+        atual = parse_valor_br(ws.acell(f"{coluna_atual}{linha}").value)
+        if budget == 0 and atual == 0:
+            continue  # categoria sem orçamento e sem gasto neste mês — não polui o painel
+        diff = budget - atual
+        total_budget += budget
+        total_atual += atual
+        cor = "#1a7f37" if diff >= 0 else "#cf222e"
+        linhas_html.append(
+            f"<tr><td>{item}</td>"
+            f"<td class='num'>{fmt_brl(budget)}</td>"
+            f"<td class='num'>{fmt_brl(atual)}</td>"
+            f"<td class='num' style='color:{cor}'>{fmt_brl(diff)}</td></tr>"
+        )
+
+    diff_total = total_budget - total_atual
+    cor_total = "#1a7f37" if diff_total >= 0 else "#cf222e"
+    atualizado_em = datetime.now().strftime("%d/%m/%Y %H:%M")
+
+    return f"""<!doctype html>
+<html lang="pt-br">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Orçamento — {mes.capitalize()}</title>
+<style>
+  :root {{ color-scheme: light dark; }}
+  body {{ font-family: -apple-system, system-ui, sans-serif; margin: 0;
+          padding: 16px; background: #ffffff; color: #1f2328; }}
+  @media (prefers-color-scheme: dark) {{
+    body {{ background: #0d1117; color: #e6edf3; }}
+    th {{ background: #161b22 !important; }}
+    tr:nth-child(even) {{ background: #161b22; }}
+    tfoot td {{ border-top-color: #30363d !important; }}
+  }}
+  h1 {{ font-size: 1.3rem; margin: 0 0 2px; }}
+  .atualizado {{ font-size: 0.8rem; opacity: 0.65; margin: 0 0 16px; }}
+  table {{ width: 100%; border-collapse: collapse; font-size: 0.92rem; }}
+  th, td {{ padding: 8px 6px; text-align: left; }}
+  th {{ background: #f0f2f5; font-size: 0.78rem; text-transform: uppercase;
+        letter-spacing: 0.02em; }}
+  td.num, th.num {{ text-align: right; font-variant-numeric: tabular-nums; }}
+  tr:nth-child(even) {{ background: #f6f8fa; }}
+  tfoot td {{ font-weight: 700; border-top: 2px solid #d0d7de; padding-top: 10px; }}
+</style>
+</head>
+<body>
+  <h1>Orçamento de {mes.capitalize()}</h1>
+  <p class="atualizado">Atualizado em {atualizado_em}</p>
+  <table>
+    <thead>
+      <tr><th>Categoria</th><th class="num">Orçamento</th><th class="num">Gasto</th><th class="num">Diferença</th></tr>
+    </thead>
+    <tbody>
+      {''.join(linhas_html)}
+    </tbody>
+    <tfoot>
+      <tr><td>Total</td>
+        <td class="num">{fmt_brl(total_budget)}</td>
+        <td class="num">{fmt_brl(total_atual)}</td>
+        <td class="num" style="color:{cor_total}">{fmt_brl(diff_total)}</td>
+      </tr>
+    </tfoot>
+  </table>
+</body>
+</html>
+"""
+
+
+# ============================================================
 # MAIN
 # ============================================================
 
@@ -419,6 +521,12 @@ def main():
                          help="Desmarca TODOS os PDFs da pasta como não processados (usado pra "
                               "corrigir uma gravação errada e permitir reprocessar as mesmas "
                               "faturas). Não mexe na planilha, só no Drive.")
+    parser.add_argument("--gerar-painel", action="store_true",
+                         help="Gera o painel HTML (mês atual x orçamento) em --painel-saida e "
+                              "sai, sem processar faturas. Só lê a planilha.")
+    parser.add_argument("--painel-saida", default="painel/index.html",
+                         help="Caminho do arquivo HTML gerado por --gerar-painel "
+                              "(padrão: painel/index.html)")
     args = parser.parse_args()
 
     if args.resetar_processados:
@@ -433,6 +541,15 @@ def main():
         return
 
     ws = conectar_planilha()
+
+    if args.gerar_painel:
+        mes = args.mes or mes_atual()
+        html = gerar_painel_html(ws, mes)
+        saida = Path(args.painel_saida)
+        saida.parent.mkdir(parents=True, exist_ok=True)
+        saida.write_text(html, encoding="utf-8")
+        print(f"Painel gerado em {saida} (mês: {mes})")
+        return
 
     if args.pdf:
         # Modo manual: um PDF local, pra teste
