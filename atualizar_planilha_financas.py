@@ -234,13 +234,19 @@ def conectar_drive():
 
 
 def listar_pdfs_novos(drive_service, folder_id: str):
-    """Lista PDFs na pasta que ainda não têm a propriedade 'processado=true'."""
+    """Lista PDFs na pasta que ainda não têm a propriedade 'processado=true',
+    do mais antigo pro mais novo. A ordem importa: se duas faturas da mesma
+    fatura em aberto (ex: dois downloads semanais de agosto) ficarem
+    pendentes ao mesmo tempo, a mais nova precisa ser processada por último
+    pra "vencer" — como cada categoria é sobrescrita (não somada), quem
+    processa por último decide o valor final da coluna."""
     query = (
         f"'{folder_id}' in parents and mimeType='application/pdf' "
         f"and trashed=false and not properties has {{key='processado' and value='true'}}"
     )
     resultado = drive_service.files().list(
-        q=query, fields="files(id, name)", pageSize=100
+        q=query, fields="files(id, name, createdTime)", pageSize=100,
+        orderBy="createdTime"
     ).execute()
     return resultado.get("files", [])
 
