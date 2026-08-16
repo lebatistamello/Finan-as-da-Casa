@@ -168,11 +168,33 @@ MESES_PT = {
     7: "julho", 8: "agosto", 9: "setembro", 10: "outubro", 11: "novembro", 12: "dezembro",
 }
 
+# Abreviações de 3 letras usadas nos nomes de arquivo do app/site do BB
+# (ex.: "OUROCARD_PLATINUM_ESTILO_VISA-Abr_26.pdf").
+MES_ABREV = {
+    "jan": "janeiro", "fev": "fevereiro", "mar": "marco", "abr": "abril",
+    "mai": "maio", "jun": "junho", "jul": "julho", "ago": "agosto",
+    "set": "setembro", "out": "outubro", "nov": "novembro", "dez": "dezembro",
+}
+
 
 def mes_atual() -> str:
     """Retorna o mês corrente em português, no formato usado por COLUNA_DO_MES.
     Usado pela Routine, que roda sozinha sem ninguém passando --mes na mão."""
     return MESES_PT[date.today().month]
+
+
+def mes_do_arquivo(nome_arquivo: str):
+    """Tenta identificar o mês de referência pelo nome do arquivo (ex.:
+    '...-Abr_26.pdf' -> 'abril'). Retorna None se não conseguir identificar,
+    para o chamador decidir o que fazer (cair no mês atual, avisar etc.)."""
+    nome = nome_arquivo.lower()
+    for mes in COLUNA_DO_MES:
+        if mes in nome:
+            return mes
+    for abrev, mes in MES_ABREV.items():
+        if re.search(rf"(?<![a-z]){abrev}(?![a-z])", nome):
+            return mes
+    return None
 
 # ============================================================
 # ACESSO AO GOOGLE DRIVE (pasta de faturas)
@@ -306,46 +328,12 @@ def escrever_totais(ws, mes: str, totais: dict, dry_run: bool = True):
 # MAIN
 # ============================================================
 
-def main():
-    parser = argparse.ArgumentParser(description="Processa fatura(s) do cartão e atualiza a planilha oficial.")
-    parser.add_argument("--pdf", help="Caminho de um PDF local (modo manual/teste)")
-    parser.add_argument("--mes", choices=list(COLUNA_DO_MES.keys()), default=None,
-                         help="Mês de referência (ex: agosto). Se omitido, usa o mês atual "
-                              "automaticamente — é assim que a Routine vai rodar sozinha.")
-    parser.add_argument("--escrever", action="store_true",
-                         help="Grava de verdade na planilha (padrão: só simula)")
-    args = parser.parse_args()
+def processar_e_escrever(ws, mes: str, lancamentos, escrever: bool):
+    """Categoriza os lançamentos de UMA fatura e grava (ou simula) os totais
+    na coluna do mês correspondente."""
+    print(f"{len(lancamentos)} lançamentos encontrados.")
 
-    mes = args.mes or mes_atual()
-    print(f"Mês de referência: {mes}" + (" (detectado automaticamente)" if not args.mes else ""))
-
-    todos_lancamentos = []
-
-    if args.pdf:
-        # Modo manual: um PDF local, pra teste
-        pdf_path = Path(args.pdf)
-        if not pdf_path.exists():
-            sys.exit(f"Arquivo não encontrado: {pdf_path}")
-        print(f"Lendo {pdf_path.name} (local)...")
-        todos_lancamentos.extend(extrair_lancamentos(str(pdf_path)))
-        arquivos_para_marcar = []
-    else:
-        # Modo automático: varre a pasta do Drive por PDFs ainda não processados
-        drive = conectar_drive()
-        pdfs_novos = listar_pdfs_novos(drive, DRIVE_FOLDER_ID)
-        if not pdfs_novos:
-            print("Nenhuma fatura nova encontrada na pasta do Drive.")
-            return
-        print(f"{len(pdfs_novos)} fatura(s) nova(s) encontrada(s) na pasta do Drive:")
-        for f in pdfs_novos:
-            print(f"  - {f['name']}")
-            pdf_bytes = baixar_pdf_drive(drive, f["id"])
-            todos_lancamentos.extend(extrair_lancamentos_de_bytes(pdf_bytes))
-        arquivos_para_marcar = pdfs_novos
-
-    print(f"\n{len(todos_lancamentos)} lançamentos encontrados no total.")
-
-    totais, nao_categorizados = somar_por_item(todos_lancamentos)
+    totais, nao_categorizados = somar_por_item(lancamentos)
 
     print("\nTotais por item:")
     for item, valor in sorted(totais.items(), key=lambda x: -x[1]):
@@ -357,15 +345,65 @@ def main():
         for desc, valor in nao_categorizados[:20]:
             print(f"  - {desc}: R$ {valor:,.2f}")
 
-    ws = conectar_planilha()
-    escrever_totais(ws, mes, totais, dry_run=not args.escrever)
+    escrever_totais(ws, mes, totais, dry_run=not escrever)
 
-    # Só marca os PDFs como processados se realmente gravou na planilha
-    if args.escrever and arquivos_para_marcar:
-        drive = conectar_drive()
-        for f in arquivos_para_marcar:
+
+def main():
+    parser = argparse.ArgumentParser(description="Processa fatura(s) do cartão e atualiza a planilha oficial.")
+    parser.add_argument("--pdf", help="Caminho de um PDF local (modo manual/teste)")
+    parser.add_argument("--mes", choices=list(COLUNA_DO_MES.keys()), default=None,
+                         help="Mês de referência (ex: agosto). No modo --pdf, se omitido usa o mês "
+                              "atual. No modo automático (pasta do Drive), se omitido cada fatura "
+                              "tem o mês identificado pelo próprio nome do arquivo (ex: "
+                              "'...-Abr_26.pdf' -> abril); passar --mes força esse mês pra TODAS "
+                              "as faturas encontradas na pasta.")
+    parser.add_argument("--escrever", action="store_true",
+                         help="Grava de verdade na planilha (padrão: só simula)")
+    args = parser.parse_args()
+
+    ws = conectar_planilha()
+
+    if args.pdf:
+        # Modo manual: um PDF local, pra teste
+        mes = args.mes or mes_atual()
+        print(f"Mês de referência: {mes}" + (" (detectado automaticamente)" if not args.mes else ""))
+        pdf_path = Path(args.pdf)
+        if not pdf_path.exists():
+            sys.exit(f"Arquivo não encontrado: {pdf_path}")
+        print(f"Lendo {pdf_path.name} (local)...")
+        lancamentos = extrair_lancamentos(str(pdf_path))
+        processar_e_escrever(ws, mes, lancamentos, args.escrever)
+        return
+
+    # Modo automático: varre a pasta do Drive por PDFs ainda não processados,
+    # cada um gravado no mês que lhe corresponde.
+    drive = conectar_drive()
+    pdfs_novos = listar_pdfs_novos(drive, DRIVE_FOLDER_ID)
+    if not pdfs_novos:
+        print("Nenhuma fatura nova encontrada na pasta do Drive.")
+        return
+    print(f"{len(pdfs_novos)} fatura(s) nova(s) encontrada(s) na pasta do Drive:")
+    for f in pdfs_novos:
+        print(f"  - {f['name']}")
+
+    for f in pdfs_novos:
+        if args.mes:
+            mes = args.mes
+        else:
+            mes = mes_do_arquivo(f["name"])
+            if mes is None:
+                mes = mes_atual()
+                print(f"\n[aviso] não identifiquei o mês pelo nome de '{f['name']}' "
+                      f"— usando o mês atual ({mes})")
+
+        print(f"\n--- {f['name']} -> mês: {mes} ---")
+        pdf_bytes = baixar_pdf_drive(drive, f["id"])
+        lancamentos = extrair_lancamentos_de_bytes(pdf_bytes)
+        processar_e_escrever(ws, mes, lancamentos, args.escrever)
+
+        if args.escrever:
             marcar_como_processado(drive, f["id"])
-        print(f"\n{len(arquivos_para_marcar)} arquivo(s) marcado(s) como processado(s) no Drive.")
+            print(f"'{f['name']}' marcado como processado no Drive.")
 
 
 if __name__ == "__main__":
