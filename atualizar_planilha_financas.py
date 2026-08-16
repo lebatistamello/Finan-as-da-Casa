@@ -403,18 +403,38 @@ def fmt_brl(valor: float) -> str:
     return f"R$ {s}"
 
 
+def _col_para_indice(letra: str) -> int:
+    """Converte letra de coluna (ex: 'E', 'N') pra índice 0-based."""
+    n = 0
+    for ch in letra.upper():
+        n = n * 26 + (ord(ch) - 64)
+    return n - 1
+
+
 def gerar_painel_html(ws, mes: str) -> str:
     """Lê o orçamento (coluna budget) e o gasto do mês atual (coluna do mês)
     de cada categoria em LINHA_DO_ITEM e monta uma página HTML simples,
-    lado a lado, com a diferença (orçamento - gasto)."""
+    lado a lado, com a diferença (orçamento - gasto).
+
+    Busca a planilha inteira numa única chamada (get_all_values) em vez de
+    uma chamada por célula — com ~35 categorias, ler célula a célula bate
+    fácil na cota de "leituras por minuto" da API do Sheets."""
     coluna_atual = COLUNA_DO_MES[mes]
+    idx_budget = _col_para_indice(COLUNA_BUDGET)
+    idx_atual = _col_para_indice(coluna_atual)
+    valores = ws.get_all_values()
+
+    def valor_em(linha: int, idx_col: int) -> str:
+        linha_dados = valores[linha - 1] if linha - 1 < len(valores) else []
+        return linha_dados[idx_col] if idx_col < len(linha_dados) else ""
+
     linhas_html = []
     total_budget = 0.0
     total_atual = 0.0
 
     for item, linha in LINHA_DO_ITEM.items():
-        budget = parse_valor_br(ws.acell(f"{COLUNA_BUDGET}{linha}").value)
-        atual = parse_valor_br(ws.acell(f"{coluna_atual}{linha}").value)
+        budget = parse_valor_br(valor_em(linha, idx_budget))
+        atual = parse_valor_br(valor_em(linha, idx_atual))
         if budget == 0 and atual == 0:
             continue  # categoria sem orçamento e sem gasto neste mês — não polui o painel
         diff = budget - atual
