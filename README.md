@@ -98,8 +98,22 @@ Drive), categoriza os lançamentos e grava os totais na planilha
      (gera `painel/index.html`; abra esse arquivo no navegador pra
      conferir antes de publicar)
 
+7. **Abas de detalhamento** — toda vez que uma fatura é processada, as
+   categorias "catch-all" (`Compras eventuais à vista` e
+   `Outros parcelamentos`) ganham cada uma sua própria aba na planilha,
+   listando os lançamentos individuais daquela fatura (maior valor
+   primeiro). Cada execução **substitui** o conteúdo da aba pelo
+   detalhamento da fatura mais recente — não é um histórico acumulado.
+   Não precisa configurar nada, as abas são criadas automaticamente na
+   primeira vez que houver algo pra detalhar.
+
 ## Aviso
 
 A extração de PDF e as regras de categorização em `REGRAS` são um ponto de
 partida baseado nos extratos do Ourocard Platinum Estilo (BB). Ajuste as
 palavras-chave conforme novos comerciantes forem aparecendo nas faturas.
+
+Compras parceladas (`PARC NN/NN` na descrição) que não batem com nenhuma
+regra específica caem em `Outros parcelamentos` (dentro de
+Dívidas/Parcelamentos), não em `Compras eventuais à vista` — mantendo as
+dívidas financiadas separadas dos gastos avulsos do dia a dia.

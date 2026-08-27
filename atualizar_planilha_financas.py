@@ -120,7 +120,7 @@ LINHA_DO_ITEM = {
     "Escola Maitê Marista": 53,
     "Escola Luise Marista": 54,
     "Gasolina CRV": 57,
-    "Estacionamento": 58,
+    "Pedágio/Estacionamento": 58,
     "IPVA Cielo": 59,
     "Seguro CRV": 60,
     "Aplicativos/táxi": 61,
@@ -128,15 +128,15 @@ LINHA_DO_ITEM = {
     "Assinaturas": 64,
     "PET": 65,
     "Investimentos": 66,
-    "Marketplaces": 69,
+    "Mercado Livre": 69,
     "Farmácia (dívida)": 70,
-    "Dafitti": 71,
+    "Dafiti": 71,
     "Adidas": 72,
-    "Outros": 73,
+    "Outros parcelamentos": 73,
     "Manutenções CRV": 74,
     "Manutenção Cielo": 75,
     "Multas de Trânsito": 78,
-    "Compras eventuais": 79,
+    "Compras eventuais à vista": 79,
     "Férias/Viagens": 80,
 }
 
@@ -152,13 +152,19 @@ REGRAS = {
                             "MERCADINHO", "BANCA 43", "HORTIFRUTI", "FRUTEIRA"],
     "Restaurantes/Deliverys": ["IFOOD", "RESTAURANT", "PIZZ", "LANCHONETE",
                                 "BURGER", "BISTRO", "CAMARADA", "CUNHA E NOSCHANG"],
-    "Farmácia/remédios": ["PANVEL", "DROGARIA", "FARMAC"],
+    "Farmácia/remédios": ["PANVEL", "DROGARIA", "FARMAC", "RAIA", "DROGA RAIA",
+                           "FARMACIAS SAO JOAO", "FARMACIA SAO JOAO", "PAGUE MENOS",
+                           "DROGASIL"],
     "Academia/Clube": ["ACADEMIA", "AABB"],
     "Salão de beleza": ["ESMALTERIA", "ESTETICA", "SALAO"],
+    "Investimento/Manutenção Casa": ["ROBERTA BALESTRIN", "CASSOL", "FERRAGEM",
+                                      "MATERIAL DE CONSTRUCAO", "TINTAS", "LEROY MERLIN",
+                                      "TELHANORTE", "C&C CASA", "MARCENARIA", "SERRALHERIA"],
     "Gasolina CRV": ["COMBUSTIVE", "POSTO ", "AUTO POSTO", "ABASTECEDORA",
                       "GAS ZONA SUL", "GASZONASUL"],
     "Seguro CRV": ["VINICIUSGAHBRIEL"],  # corretor do seguro (era da Duster, trocada pela CRV)
-    "Estacionamento": ["ESTACIONAMENTO", "HORA PARK", "ALLPARK"],
+    "Pedágio/Estacionamento": ["ESTACIONAMENTO", "HORA PARK", "ALLPARK", "ESTAPAR", "ZUL PARK",
+                                "SEM PARAR", "CONECTCAR", "VELOE", "MOVE MAIS", "TAGGY", "PEDAGIO"],
     "Aplicativos/táxi": ["UBER", "99*", "99 "],
     "Assinaturas": ["SPOTIFY", "NETFLIX", "AMAZON PRIME", "GLOBO PREMIER",
                      "ICLOUD", "YOUTUBE"],
@@ -167,6 +173,8 @@ REGRAS = {
     "Escola Luise Marista": ["ESCOLA LUISE", "MARISTA LUISE"],
     "Atividades Maitê": ["IMPULSE"],
     "Taxas": ["TAXA", "IOF", "ANUIDADE"],
+    "Dafiti": ["DAFITI"],
+    "Adidas": ["ADIDAS"],
     # Regras adicionais vão aparecendo conforme mais faturas forem processadas —
     # peça ao Claude Code pra te ajudar a ir expandindo isso.
 }
@@ -176,8 +184,8 @@ REGRAS = {
 # Uma compra à vista nesses mesmos lugares (ex: Mercado Livre à vista) não
 # cai aqui — segue as REGRAS normais acima (ou o catch-all de eventuais).
 REGRAS_PARCELAMENTO = {
-    "Marketplaces": ["MERCADOLIVRE", "MERCADO LIVRE", "MP*MELIMAIS", "MELIMAIS",
-                      "AMAZON", "SHOPEE", "ALIEXPRESS", "SHEIN"],
+    "Mercado Livre": ["MERCADOLIVRE", "MERCADO LIVRE", "MP*MELIMAIS", "MELIMAIS",
+                       "AMAZON", "SHOPEE", "ALIEXPRESS", "SHEIN"],
 }
 
 # Quando a compra é parcelada, alguns itens das REGRAS normais são
@@ -188,7 +196,11 @@ REDIRECIONA_SE_PARCELADO = {
 
 PARCELA_REGEX = re.compile(r"PARC\s*\d{1,2}\s*/\s*\d{1,2}", re.IGNORECASE)
 
-DEFAULT_ITEM = "Compras eventuais"  # cai aqui se nada bater
+DEFAULT_ITEM = "Compras eventuais à vista"  # cai aqui se nada bater e não for parcelado
+ITEM_PARCELAMENTO_GENERICO = "Outros parcelamentos"  # cai aqui se for parcelado (PARC NN/NN)
+                                                       # mas não bateu com nenhum comerciante
+                                                       # conhecido — dentro de Dívidas/Parcelamentos,
+                                                       # não misturado com compras avulsas do dia a dia
 
 MESES_PT = {
     1: "janeiro", 2: "fevereiro", 3: "marco", 4: "abril", 5: "maio", 6: "junho",
@@ -339,6 +351,11 @@ def categorizar(descricao: str) -> str:
                 return REDIRECIONA_SE_PARCELADO[item]
             return item
 
+    # não bateu com nenhum comerciante conhecido — mas se o texto tem "PARC 01/03"
+    # (padrão de parcelamento do Ourocard), é uma dívida/parcelamento não mapeado
+    # ainda, não uma compra eventual comum
+    if parcelado:
+        return ITEM_PARCELAMENTO_GENERICO
     return DEFAULT_ITEM
 
 
@@ -348,7 +365,7 @@ def somar_por_item(lancamentos):
     for desc, valor in lancamentos:
         item = categorizar(desc)
         totais[item] = totais.get(item, 0.0) + valor
-        if item == DEFAULT_ITEM:
+        if item in (DEFAULT_ITEM, ITEM_PARCELAMENTO_GENERICO):
             nao_categorizados.append((desc, valor))
     return totais, nao_categorizados
 
@@ -358,10 +375,14 @@ def somar_por_item(lancamentos):
 # ============================================================
 
 def conectar_planilha():
+    """Retorna (spreadsheet, worksheet_principal). O spreadsheet é necessário
+    à parte pra poder criar/acessar as abas de detalhamento (ver
+    escrever_detalhamento)."""
     scopes = ["https://www.googleapis.com/auth/spreadsheets"]
     creds = Credentials.from_service_account_file(CREDENTIALS_FILE, scopes=scopes)
     client = gspread.authorize(creds)
-    return client.open_by_key(SPREADSHEET_ID).worksheet(SHEET_NAME)
+    spreadsheet = client.open_by_key(SPREADSHEET_ID)
+    return spreadsheet, spreadsheet.worksheet(SHEET_NAME)
 
 def escrever_totais(ws, mes: str, totais: dict, dry_run: bool = True):
     coluna = COLUNA_DO_MES[mes]
@@ -384,6 +405,53 @@ def escrever_totais(ws, mes: str, totais: dict, dry_run: bool = True):
         print("\nPlanilha atualizada.")
     else:
         print("\n(Rodando em modo simulação — use --escrever para gravar de verdade)")
+
+
+# ============================================================
+# ABAS DE DETALHAMENTO — "Compras eventuais à vista" e "Outros parcelamentos"
+#
+# Toda vez que uma fatura é processada, a aba com o nome exato da categoria
+# é SUBSTITUÍDA por inteiro com a lista de lançamentos que caíram nela NAQUELA
+# fatura (não é um acumulado histórico). Como o BB atualiza a mesma fatura em
+# aberto conforme o mês avança, reprocessar semanalmente já mantém a aba
+# refletindo o mês inteiro até a data do processamento — mesma lógica de
+# "sobrescreve, não soma" usada pros totais na aba principal.
+# ============================================================
+
+ITENS_DETALHADOS = [DEFAULT_ITEM, ITEM_PARCELAMENTO_GENERICO]
+
+
+def obter_ou_criar_aba(spreadsheet, nome: str):
+    try:
+        return spreadsheet.worksheet(nome)
+    except gspread.exceptions.WorksheetNotFound:
+        return spreadsheet.add_worksheet(title=nome, rows=200, cols=4)
+
+
+def escrever_detalhamento(spreadsheet, mes: str, lancamentos: list, dry_run: bool = True):
+    for item in ITENS_DETALHADOS:
+        detalhes = [(desc, valor) for desc, valor in lancamentos if categorizar(desc) == item]
+        detalhes.sort(key=lambda x: -x[1])  # maiores gastos primeiro
+
+        print(f"\n{'[SIMULAÇÃO] ' if dry_run else ''}Detalhamento de '{item}' ({mes}): "
+              f"{len(detalhes)} lançamento(s), total R$ {sum(v for _, v in detalhes):,.2f}")
+        for desc, valor in detalhes[:15]:
+            print(f"  {desc}: R$ {valor:,.2f}")
+        if len(detalhes) > 15:
+            print(f"  ... e mais {len(detalhes) - 15} lançamento(s)")
+
+        if dry_run:
+            continue
+
+        ws_detalhe = obter_ou_criar_aba(spreadsheet, item)
+        ws_detalhe.clear()
+        linhas = [[f"{item} — {mes.capitalize()}/2026", "", ""],
+                  ["Descrição", "Valor (R$)", ""]]
+        for desc, valor in detalhes:
+            linhas.append([desc, round(valor, 2), ""])
+        linhas.append(["TOTAL", round(sum(v for _, v in detalhes), 2), ""])
+        ws_detalhe.update(linhas, "A1")
+        print(f"Aba '{item}' substituída com {len(detalhes)} lançamento(s).")
 
 
 # ============================================================
@@ -514,9 +582,10 @@ def gerar_painel_html(ws, mes: str) -> str:
 # MAIN
 # ============================================================
 
-def processar_e_escrever(ws, mes: str, lancamentos, escrever: bool):
-    """Categoriza os lançamentos de UMA fatura e grava (ou simula) os totais
-    na coluna do mês correspondente."""
+def processar_e_escrever(spreadsheet, ws, mes: str, lancamentos, escrever: bool):
+    """Categoriza os lançamentos de UMA fatura, grava (ou simula) os totais
+    na coluna do mês correspondente, e atualiza as abas de detalhamento das
+    categorias "catch-all" (Compras eventuais à vista / Outros parcelamentos)."""
     print(f"{len(lancamentos)} lançamentos encontrados.")
 
     totais, nao_categorizados = somar_por_item(lancamentos)
@@ -527,11 +596,13 @@ def processar_e_escrever(ws, mes: str, lancamentos, escrever: bool):
 
     if nao_categorizados:
         print(f"\n[atenção] {len(nao_categorizados)} lançamentos caíram em "
-              f"'{DEFAULT_ITEM}' por falta de regra — confira se fazem sentido:")
+              f"'{DEFAULT_ITEM}' ou '{ITEM_PARCELAMENTO_GENERICO}' por falta de "
+              f"regra — confira se fazem sentido:")
         for desc, valor in nao_categorizados[:20]:
             print(f"  - {desc}: R$ {valor:,.2f}")
 
     escrever_totais(ws, mes, totais, dry_run=not escrever)
+    escrever_detalhamento(spreadsheet, mes, lancamentos, dry_run=not escrever)
 
 
 def main():
@@ -568,7 +639,7 @@ def main():
             print(f"'{f['name']}' desmarcado como processado.")
         return
 
-    ws = conectar_planilha()
+    spreadsheet, ws = conectar_planilha()
 
     if args.gerar_painel:
         mes = args.mes or mes_atual()
@@ -588,7 +659,7 @@ def main():
             sys.exit(f"Arquivo não encontrado: {pdf_path}")
         print(f"Lendo {pdf_path.name} (local)...")
         lancamentos = extrair_lancamentos(str(pdf_path))
-        processar_e_escrever(ws, mes, lancamentos, args.escrever)
+        processar_e_escrever(spreadsheet, ws, mes, lancamentos, args.escrever)
         return
 
     # Modo automático: varre a pasta do Drive por PDFs ainda não processados,
@@ -615,7 +686,7 @@ def main():
         print(f"\n--- {f['name']} -> mês: {mes} ---")
         pdf_bytes = baixar_pdf_drive(drive, f["id"])
         lancamentos = extrair_lancamentos_de_bytes(pdf_bytes)
-        processar_e_escrever(ws, mes, lancamentos, args.escrever)
+        processar_e_escrever(spreadsheet, ws, mes, lancamentos, args.escrever)
 
         if args.escrever:
             marcar_como_processado(drive, f["id"])
