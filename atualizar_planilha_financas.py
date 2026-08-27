@@ -175,24 +175,15 @@ REGRAS = {
     "Taxas": ["TAXA", "IOF", "ANUIDADE"],
     "Dafiti": ["DAFITI"],
     "Adidas": ["ADIDAS"],
+    "Mercado Livre": ["MERCADOLIVRE", "MERCADO LIVRE", "MP*MELIMAIS", "MELIMAIS",
+                       "AMAZON", "SHOPEE", "ALIEXPRESS", "SHEIN"],
     # Regras adicionais vão aparecendo conforme mais faturas forem processadas —
     # peça ao Claude Code pra te ajudar a ir expandindo isso.
 }
-
-# Regras que só valem para compras PARCELADAS (descrição com "PARC NN/NN"),
-# usadas para alimentar as linhas de "Dívidas/Parcelamentos" da planilha.
-# Uma compra à vista nesses mesmos lugares (ex: Mercado Livre à vista) não
-# cai aqui — segue as REGRAS normais acima (ou o catch-all de eventuais).
-REGRAS_PARCELAMENTO = {
-    "Mercado Livre": ["MERCADOLIVRE", "MERCADO LIVRE", "MP*MELIMAIS", "MELIMAIS",
-                       "AMAZON", "SHOPEE", "ALIEXPRESS", "SHEIN"],
-}
-
-# Quando a compra é parcelada, alguns itens das REGRAS normais são
-# redirecionados para a linha de dívida equivalente.
-REDIRECIONA_SE_PARCELADO = {
-    "Farmácia/remédios": "Farmácia (dívida)",
-}
+# Todo comerciante mapeado acima cai sempre na mesma linha, à vista ou
+# parcelado (confirmado com a família em 27/08/2026) — só o que NÃO bate
+# com nenhuma regra é que se divide entre "à vista" e "parcelado" (ver
+# categorizar() e ITEM_PARCELAMENTO_GENERICO/DEFAULT_ITEM logo abaixo).
 
 PARCELA_REGEX = re.compile(r"PARC\s*\d{1,2}\s*/\s*\d{1,2}", re.IGNORECASE)
 
@@ -338,23 +329,15 @@ def extrair_lancamentos(pdf_path: str):
 
 def categorizar(descricao: str) -> str:
     desc_upper = descricao.upper()
-    parcelado = bool(PARCELA_REGEX.search(descricao))
-
-    if parcelado:
-        for item, palavras in REGRAS_PARCELAMENTO.items():
-            if any(p in desc_upper for p in palavras):
-                return item
 
     for item, palavras in REGRAS.items():
         if any(p in desc_upper for p in palavras):
-            if parcelado and item in REDIRECIONA_SE_PARCELADO:
-                return REDIRECIONA_SE_PARCELADO[item]
             return item
 
     # não bateu com nenhum comerciante conhecido — mas se o texto tem "PARC 01/03"
     # (padrão de parcelamento do Ourocard), é uma dívida/parcelamento não mapeado
     # ainda, não uma compra eventual comum
-    if parcelado:
+    if PARCELA_REGEX.search(descricao):
         return ITEM_PARCELAMENTO_GENERICO
     return DEFAULT_ITEM
 
