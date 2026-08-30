@@ -92,52 +92,54 @@ COLUNA_DO_MES = {
 }
 COLUNA_BUDGET = "N"
 
-# Linha de cada item na planilha. Contado a partir do conteúdo real lido em
-# 15/08/2026 (a aba tem, nessa ordem: cabeçalho/objetivos linhas 1-5,
-# "O que tenho" 6-13, "O que devo" 14-17, "RECEBIMENTOS" 18-23,
-# "DESPESAS FIXAS" a partir da 24). Ainda assim, CONFIRA VISUALMENTE na
-# planilha antes de rodar com --escrever. Reconstruído em 16/08/2026 a
-# partir de uma exportação CSV bruta da planilha nativa (posição exata de
-# cada linha/coluna preservada) — NÃO confiar em leituras de "texto
-# natural" do Drive pra isso, elas comprimem/pulam linhas em branco e
-# desalinham a contagem (foi exatamente o que causou o erro anterior).
+# Linha de cada item na planilha. A família removeu o bloco "O que tenho" /
+# "O que devo" (17 linhas) que existia acima de RECEBIMENTOS quando
+# reestruturou a aba em 27/08/2026 — isso empurrou TODAS as linhas abaixo 24
+# posições pra cima, e como os números aqui não foram reajustados, toda
+# gravação de --escrever entre 27/08 e 30/08 escreveu 24 linhas abaixo de
+# onde deveria (em linhas em branco, ou pior, por cima de outra categoria/de
+# fórmulas como SALDO DO MÊS). Renumerado em 30/08/2026 direto de uma
+# exportação CSV bruta da planilha nativa (posição exata de cada linha/coluna
+# preservada) — NÃO confiar em leituras de "texto natural" do Drive pra isso,
+# elas comprimem/pulam linhas em branco e desalinham a contagem. Ainda assim,
+# CONFIRA VISUALMENTE na planilha antes de rodar com --escrever.
 LINHA_DO_ITEM = {
-    "Energia elétrica": 33,
-    "Água": 34,
-    "Gás e Lenha": 35,
-    "Internet": 36,
-    "Supermercado/feira": 37,
-    "Restaurantes/Deliverys": 38,
-    "Investimento/Manutenção Casa": 39,
-    "Limpeza (Casa e Pátio)": 40,
-    "IPTU parcelado 10x": 41,
-    "Plano de saúde": 44,
-    "Academia/Clube": 45,
-    "Farmácia/remédios": 46,
-    "Salão de beleza": 47,
-    "Atividades Luise": 51,
-    "Atividades Maitê": 52,
-    "Escola Maitê Marista": 53,
-    "Escola Luise Marista": 54,
-    "Gasolina CRV": 57,
-    "Pedágio/Estacionamento": 58,
-    "IPVA Cielo": 59,
-    "Seguro CRV": 60,
-    "Aplicativos/táxi": 61,
-    "Taxas": 63,
-    "Assinaturas": 64,
-    "PET": 65,
-    "Investimentos": 66,
-    "Mercado Livre": 69,
-    "Farmácia (dívida)": 70,
-    "Dafiti": 71,
-    "Adidas": 72,
-    "Outros parcelamentos": 73,
-    "Manutenções CRV": 74,
-    "Manutenção Cielo": 75,
-    "Multas de Trânsito": 78,
-    "Compras eventuais à vista": 79,
-    "Férias/Viagens": 80,
+    "Energia elétrica": 9,
+    "Água": 10,
+    "Gás e Lenha": 11,
+    "Internet": 12,
+    "Supermercado/feira": 13,
+    "Restaurantes/Deliverys": 14,
+    "Investimento/Manutenção Casa": 15,
+    "Limpeza (Casa e Pátio)": 16,
+    "IPTU parcelado 10x": 17,
+    "Plano de saúde": 20,
+    "Academia/Clube": 21,
+    "Farmácia/remédios": 22,
+    "Salão de beleza": 23,
+    "Atividades Luise": 27,
+    "Atividades Maitê": 28,
+    "Escola Maitê Marista": 29,
+    "Escola Luise Marista": 30,
+    "Gasolina CRV": 33,
+    "Pedágio/Estacionamento": 34,
+    "IPVA Cielo": 35,
+    "Seguro CRV": 36,
+    "Aplicativos/táxi": 37,
+    "Taxas": 39,
+    "Assinaturas": 40,
+    "PET": 41,
+    "Investimentos": 42,
+    "Mercado Livre": 45,
+    "Farmácia (dívida)": 46,
+    "Dafiti": 47,
+    "Adidas": 48,
+    "Outros parcelamentos": 49,
+    "Manutenções CRV": 50,
+    "Manutenção Cielo": 51,
+    "Multas de Trânsito": 54,
+    "Compras eventuais à vista": 55,
+    "Férias/Viagens": 56,
 }
 
 # ============================================================
@@ -616,6 +618,10 @@ def main():
     parser.add_argument("--painel-saida", default="painel/index.html",
                          help="Caminho do arquivo HTML gerado por --gerar-painel "
                               "(padrão: painel/index.html)")
+    parser.add_argument("--limpar-celulas",
+                         help="Manutenção: apaga o conteúdo das células informadas (ex: "
+                              "'I57,I58') e sai, sem processar faturas. Usado pra corrigir "
+                              "lixo deixado por uma gravação com LINHA_DO_ITEM desalinhado.")
     args = parser.parse_args()
 
     if args.resetar_processados:
@@ -627,6 +633,14 @@ def main():
         for f in pdfs:
             desmarcar_processado(drive, f["id"])
             print(f"'{f['name']}' desmarcado como processado.")
+        return
+
+    if args.limpar_celulas:
+        _, ws = conectar_planilha()
+        celulas = [c.strip() for c in args.limpar_celulas.split(",") if c.strip()]
+        for cell in celulas:
+            ws.update_acell(cell, "")
+            print(f"Célula {cell} limpa.")
         return
 
     spreadsheet, ws = conectar_planilha()
