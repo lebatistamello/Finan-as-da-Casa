@@ -508,17 +508,22 @@ def gerar_painel_html(ws, mes: str) -> str:
 
         pct = (atual / budget * 100) if budget > 0 else (100.0 if atual > 0 else 0.0)
         pct_barra = min(pct, 100.0)
-        if pct < 70:
-            status = "good"
-        elif pct < 100:
+        diferenca = atual - budget
+        if budget <= 0:
+            status = "estourado" if atual > 0 else "good"
+        elif diferenca > 0.005:
+            status = "estourado"  # passou do orçado — roxo
+        elif abs(diferenca) <= 0.005:
+            status = "critical"  # bateu certinho no orçado — vermelho
+        elif pct >= 70:
             status = "warning"
         else:
-            status = "critical"
+            status = "good"
 
         estouro_html = ""
         if atual > budget > 0:
             estouro_html = (
-                f'<p class="estouro">⚠ estourou em {fmt_brl(atual - budget)}</p>'
+                f'<p class="estouro">⚠ estourou em {fmt_brl(diferenca)}</p>'
             )
 
         linhas_html.append(f"""
@@ -558,6 +563,7 @@ def gerar_painel_html(ws, mes: str) -> str:
     --good: #0ca30c;
     --warning: #fab219;
     --critical: #d03b3b;
+    --estourado: #4a3aa7;
     --border: rgba(11,11,11,0.10);
   }}
   @media (prefers-color-scheme: dark) {{
@@ -571,6 +577,7 @@ def gerar_painel_html(ws, mes: str) -> str:
       --good: #0ca30c;
       --warning: #fab219;
       --critical: #e66767;
+      --estourado: #9085e9;
       --border: rgba(255,255,255,0.10);
     }}
   }}
@@ -604,7 +611,8 @@ def gerar_painel_html(ws, mes: str) -> str:
   .preenchimento.good {{ background: var(--good); }}
   .preenchimento.warning {{ background: var(--warning); }}
   .preenchimento.critical {{ background: var(--critical); }}
-  .estouro {{ margin: 4px 0 0; font-size: 0.78rem; color: var(--critical); }}
+  .preenchimento.estourado {{ background: var(--estourado); }}
+  .estouro {{ margin: 4px 0 0; font-size: 0.78rem; color: var(--estourado); }}
 </style>
 </head>
 <body>
