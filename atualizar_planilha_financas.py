@@ -503,19 +503,40 @@ def gerar_painel_html(ws, mes: str) -> str:
         atual = parse_valor_br(valor_em(linha, idx_atual))
         if budget == 0 and atual == 0:
             continue  # categoria sem orçamento e sem gasto neste mês — não polui o painel
-        diff = budget - atual
         total_budget += budget
         total_atual += atual
-        cor = "#1a7f37" if diff >= 0 else "#cf222e"
-        linhas_html.append(
-            f"<tr><td>{item}</td>"
-            f"<td class='num'>{fmt_brl(budget)}</td>"
-            f"<td class='num'>{fmt_brl(atual)}</td>"
-            f"<td class='num' style='color:{cor}'>{fmt_brl(diff)}</td></tr>"
-        )
+
+        pct = (atual / budget * 100) if budget > 0 else (100.0 if atual > 0 else 0.0)
+        pct_barra = min(pct, 100.0)
+        if pct < 70:
+            status = "good"
+        elif pct < 100:
+            status = "warning"
+        else:
+            status = "critical"
+
+        estouro_html = ""
+        if atual > budget > 0:
+            estouro_html = (
+                f'<p class="estouro">⚠ estourou em {fmt_brl(atual - budget)}</p>'
+            )
+
+        linhas_html.append(f"""
+      <div class="item">
+        <p class="categoria">{item}</p>
+        <div class="medidor-linha">
+          <span class="valor valor-gasto">{fmt_brl(atual)}</span>
+          <div class="trilho">
+            <div class="preenchimento {status}" style="width:{pct_barra:.1f}%"></div>
+          </div>
+          <span class="valor valor-orcamento">{fmt_brl(budget)}</span>
+        </div>
+        {estouro_html}
+      </div>""")
 
     diff_total = total_budget - total_atual
-    cor_total = "#1a7f37" if diff_total >= 0 else "#cf222e"
+    pct_total = (total_atual / total_budget * 100) if total_budget > 0 else 0.0
+    cor_total = "var(--good)" if diff_total >= 0 else "var(--critical)"
     atualizado_em = datetime.now().strftime("%d/%m/%Y %H:%M")
 
     return f"""<!doctype html>
@@ -527,44 +548,72 @@ def gerar_painel_html(ws, mes: str) -> str:
 <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>%F0%9F%8F%A0</text></svg>">
 <link rel="apple-touch-icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><rect width=%22100%22 height=%22100%22 rx=%2220%22 fill=%22%23ffffff%22/><text x=%2250%22 y=%2270%22 font-size=%2260%22 text-anchor=%22middle%22>%F0%9F%8F%A0</text></svg>">
 <style>
-  :root {{ color-scheme: light dark; }}
-  body {{ font-family: -apple-system, system-ui, sans-serif; margin: 0;
-          padding: 16px; background: #ffffff; color: #1f2328; }}
-  @media (prefers-color-scheme: dark) {{
-    body {{ background: #0d1117; color: #e6edf3; }}
-    th {{ background: #161b22 !important; }}
-    tr:nth-child(even) {{ background: #161b22; }}
-    tfoot td {{ border-top-color: #30363d !important; }}
+  :root {{
+    color-scheme: light;
+    --surface: #fcfcfb;
+    --text-primary: #0b0b0b;
+    --text-secondary: #52514e;
+    --text-muted: #898781;
+    --trilho: #e1e0d9;
+    --good: #0ca30c;
+    --warning: #fab219;
+    --critical: #d03b3b;
+    --border: rgba(11,11,11,0.10);
   }}
+  @media (prefers-color-scheme: dark) {{
+    :root {{
+      color-scheme: dark;
+      --surface: #1a1a19;
+      --text-primary: #ffffff;
+      --text-secondary: #c3c2b7;
+      --text-muted: #898781;
+      --trilho: #2c2c2a;
+      --good: #0ca30c;
+      --warning: #fab219;
+      --critical: #e66767;
+      --border: rgba(255,255,255,0.10);
+    }}
+  }}
+  body {{
+    font-family: -apple-system, system-ui, "Segoe UI", sans-serif; margin: 0;
+    padding: 16px; background: var(--surface); color: var(--text-primary);
+    overflow-x: hidden;
+  }}
+  .item {{ max-width: 100%; }}
   h1 {{ font-size: 1.3rem; margin: 0 0 2px; }}
-  .atualizado {{ font-size: 0.8rem; opacity: 0.65; margin: 0 0 16px; }}
-  table {{ width: 100%; border-collapse: collapse; font-size: 0.92rem; }}
-  th, td {{ padding: 8px 6px; text-align: left; }}
-  th {{ background: #f0f2f5; font-size: 0.78rem; text-transform: uppercase;
-        letter-spacing: 0.02em; }}
-  td.num, th.num {{ text-align: right; font-variant-numeric: tabular-nums; }}
-  tr:nth-child(even) {{ background: #f6f8fa; }}
-  tfoot td {{ font-weight: 700; border-top: 2px solid #d0d7de; padding-top: 10px; }}
+  .atualizado {{ font-size: 0.8rem; color: var(--text-muted); margin: 0 0 4px; }}
+  .resumo {{ font-size: 0.95rem; color: var(--text-secondary); margin: 0 0 20px; }}
+  .resumo strong {{ color: {cor_total}; }}
+  .item {{ padding: 10px 0; border-bottom: 1px solid var(--border); }}
+  .item:last-child {{ border-bottom: none; }}
+  .categoria {{ margin: 0 0 6px; font-size: 0.92rem; }}
+  .medidor-linha {{
+    display: grid; grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center; gap: 8px; width: 100%;
+  }}
+  .valor {{
+    font-size: 0.8rem; font-variant-numeric: tabular-nums; color: var(--text-secondary);
+    white-space: nowrap;
+  }}
+  .valor-gasto {{ color: var(--text-primary); font-weight: 600; }}
+  .trilho {{
+    min-width: 0; height: 14px; border-radius: 999px; background: var(--trilho);
+    overflow: hidden;
+  }}
+  .preenchimento {{ height: 100%; border-radius: 999px; }}
+  .preenchimento.good {{ background: var(--good); }}
+  .preenchimento.warning {{ background: var(--warning); }}
+  .preenchimento.critical {{ background: var(--critical); }}
+  .estouro {{ margin: 4px 0 0; font-size: 0.78rem; color: var(--critical); }}
 </style>
 </head>
 <body>
   <h1>Orçamento de {mes.capitalize()}</h1>
   <p class="atualizado">Atualizado em {atualizado_em}</p>
-  <table>
-    <thead>
-      <tr><th>Categoria</th><th class="num">Orçamento</th><th class="num">Gasto</th><th class="num">Diferença</th></tr>
-    </thead>
-    <tbody>
-      {''.join(linhas_html)}
-    </tbody>
-    <tfoot>
-      <tr><td>Total</td>
-        <td class="num">{fmt_brl(total_budget)}</td>
-        <td class="num">{fmt_brl(total_atual)}</td>
-        <td class="num" style="color:{cor_total}">{fmt_brl(diff_total)}</td>
-      </tr>
-    </tfoot>
-  </table>
+  <p class="resumo">Total: <strong>{fmt_brl(total_atual)}</strong> de {fmt_brl(total_budget)} previstos ({pct_total:.0f}%)</p>
+  <div class="lista">
+    {''.join(linhas_html)}
+  </div>
 </body>
 </html>
 """
