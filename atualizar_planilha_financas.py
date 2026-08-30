@@ -299,23 +299,30 @@ def extrair_lancamentos_de_bytes(pdf_bytes: bytes):
     """Mesma extração de extrair_lancamentos, mas a partir de bytes em memória
     (útil quando o PDF vem direto do Drive, sem salvar em disco)."""
     lancamentos = []
+    # Sem âncora de fim de linha (nem $): pega o PRIMEIRO valor em R$ depois da
+    # descrição, não o último. O layout dessa fatura às vezes emenda duas
+    # transações na mesma linha de texto (quando caem na mesma altura/y da
+    # página) ou emenda um "Total" de seção logo depois do último lançamento —
+    # com âncora de fim de linha, a regra antiga pegava esse valor errado (o
+    # da direita) e engolia a transação de verdade inteira dentro da descrição.
+    # finditer (em vez de match) faz o mesmo scan pegar as DUAS transações
+    # quando elas vêm emendadas, ao invés de só reconhecer a primeira e
+    # descartar a segunda.
     linha_regex = re.compile(
-        r"^\s*\d{2}/\d{2}\s+(.+?)\s+(?:BR|[A-Z]{2})?\s*R?\$?\s*([\d.,]+)\s*$"
+        r"(?:^|\s)\d{2}/\d{2}\s+(.+?)\s+(?:BR|[A-Z]{2})?\s*R?\$?\s*(\d{1,3}(?:\.\d{3})*,\d{2})\b"
     )
     with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
         for page in pdf.pages:
             text = page.extract_text() or ""
             for line in text.split("\n"):
-                m = linha_regex.match(line)
-                if not m:
-                    continue
-                desc = m.group(1).strip()
-                valor_str = m.group(2).replace(".", "").replace(",", ".")
-                try:
-                    valor = float(valor_str)
-                except ValueError:
-                    continue
-                lancamentos.append((desc, valor))
+                for m in linha_regex.finditer(line):
+                    desc = m.group(1).strip()
+                    valor_str = m.group(2).replace(".", "").replace(",", ".")
+                    try:
+                        valor = float(valor_str)
+                    except ValueError:
+                        continue
+                    lancamentos.append((desc, valor))
     return lancamentos
 
 
