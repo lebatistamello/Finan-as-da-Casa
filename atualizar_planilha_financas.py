@@ -526,6 +526,31 @@ def gerar_painel_html(ws, mes: str) -> str:
                 f'<p class="estouro">⚠ estourou em {fmt_brl(diferenca)}</p>'
             )
 
+        # Quanto ainda falta pra bater no orçado — só faz sentido mostrar em
+        # good/warning (em "critical"/"estourado" a sobra é zero ou negativa).
+        # Mostra dentro da própria barra (no trilho, depois do preenchimento)
+        # quando sobra espaço de sobra pra caber o texto sem cortar; a
+        # estimativa é grosseira (não temos as larguras reais renderizadas
+        # aqui no servidor), então em barras muito cheias joga a mesma
+        # informação pra uma linha abaixo em vez de arriscar cortar o texto
+        # dentro do trilho.
+        disponivel_dentro = ""
+        disponivel_fora = ""
+        if status in ("good", "warning") and budget > 0:
+            disponivel = budget - atual
+            valor_disponivel = fmt_brl(disponivel)
+            trilho_px_estimado = 190
+            espaco_livre_px = trilho_px_estimado * (100 - pct_barra) / 100
+            # Versão de dentro do trilho fica só com o valor (sem a palavra
+            # "disponível") pra caber em mais barras — a posição já deixa
+            # claro que é a sobra. De fora (fallback), o texto ganha a
+            # palavra de volta porque perde esse contexto posicional.
+            texto_px_estimado = len(valor_disponivel) * 6.5 + 12
+            if espaco_livre_px >= texto_px_estimado:
+                disponivel_dentro = f'<span class="disponivel">{valor_disponivel}</span>'
+            else:
+                disponivel_fora = f'<p class="disponivel-fora">{valor_disponivel} disponível</p>'
+
         linhas_html.append(f"""
       <div class="item">
         <p class="categoria">{item}</p>
@@ -533,10 +558,12 @@ def gerar_painel_html(ws, mes: str) -> str:
           <span class="valor valor-gasto">{fmt_brl(atual)}</span>
           <div class="trilho">
             <div class="preenchimento {status}" style="width:{pct_barra:.1f}%"></div>
+            {disponivel_dentro}
           </div>
           <span class="valor valor-orcamento">{fmt_brl(budget)}</span>
         </div>
         {estouro_html}
+        {disponivel_fora}
       </div>""")
 
     diff_total = total_budget - total_atual
@@ -604,14 +631,20 @@ def gerar_painel_html(ws, mes: str) -> str:
   }}
   .valor-gasto {{ color: var(--text-primary); font-weight: 600; }}
   .trilho {{
-    min-width: 0; height: 14px; border-radius: 999px; background: var(--trilho);
-    overflow: hidden;
+    position: relative; min-width: 0; height: 20px; border-radius: 999px;
+    background: var(--trilho); overflow: hidden;
   }}
   .preenchimento {{ height: 100%; border-radius: 999px; }}
   .preenchimento.good {{ background: var(--good); }}
   .preenchimento.warning {{ background: var(--warning); }}
   .preenchimento.critical {{ background: var(--critical); }}
   .preenchimento.estourado {{ background: var(--estourado); }}
+  .disponivel {{
+    position: absolute; top: 50%; right: 8px; transform: translateY(-50%);
+    font-size: 0.66rem; font-variant-numeric: tabular-nums; color: var(--text-secondary);
+    white-space: nowrap;
+  }}
+  .disponivel-fora {{ margin: 4px 0 0; font-size: 0.78rem; color: var(--text-muted); }}
   .estouro {{ margin: 4px 0 0; font-size: 0.78rem; color: var(--estourado); }}
 </style>
 </head>
