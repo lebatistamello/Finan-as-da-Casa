@@ -151,7 +151,8 @@ LINHA_DO_ITEM = {
 
 REGRAS = {
     "Supermercado/feira": ["SUPER TCHE", "ZAFFARI", "BISTEK", "SAMS CLUB",
-                            "MERCADINHO", "BANCA 43", "HORTIFRUTI", "FRUTEIRA"],
+                            "MERCADINHO", "BANCA 43", "HORTIFRUTI", "FRUTEIRA",
+                            "SHOPPING DE CARNES"],
     "Restaurantes/Deliverys": ["IFOOD", "RESTAURANT", "PIZZ", "LANCHONETE",
                                 "BURGER", "BISTRO", "CAMARADA", "CUNHA E NOSCHANG"],
     "Farmácia/remédios": ["PANVEL", "DROGARIA", "FARMAC", "RAIA", "DROGA RAIA",
