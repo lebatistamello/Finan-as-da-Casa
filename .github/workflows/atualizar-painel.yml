@@ -5,6 +5,12 @@ on:
     # Todo dia, 08:00 (horário de Brasília / 11:00 UTC)
     - cron: '0 11 * * *'
   workflow_dispatch: {}
+  workflow_run:
+    # Sempre que a planilha é atualizada (manual ou pela Routine semanal),
+    # republica o painel na sequência — sem isso ele só pegava os dados
+    # novos no próximo cron diário, até 24h depois.
+    workflows: ["Atualizar planilha com fatura do cartão"]
+    types: [completed]
 
 permissions:
   contents: read
@@ -18,12 +24,22 @@ concurrency:
 
 jobs:
   gerar-e-publicar:
+    # Pulado se o run que disparou (via workflow_run) tiver falhado —
+    # não tem planilha nova pra refletir. Schedule/workflow_dispatch
+    # passam direto.
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          # No disparo via workflow_run, o checkout padrão não garante a
+          # branch que gerou o evento — fixamos explicitamente. Nos outros
+          # gatilhos (schedule/workflow_dispatch), github.ref já resolve certo
+          # e isso vira um no-op.
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_branch || github.ref }}
 
       - uses: actions/setup-python@v5
         with:
