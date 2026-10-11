@@ -92,6 +92,11 @@ COLUNA_DO_MES = {
 }
 COLUNA_BUDGET = "N"
 
+# Linha do "TOTAL DE RECEBIMENTOS" — usada só pelo painel, pra mostrar a
+# receita do mês (RECEBIMENTOS linhas 1-6: cabeçalho, Depósito Lisandra,
+# Depósito Leandro, Extras Lisandra, Extras Leandro, total).
+LINHA_TOTAL_RECEBIMENTOS = 6
+
 # Linha de cada item na planilha. A família removeu o bloco "O que tenho" /
 # "O que devo" (17 linhas) que existia acima de RECEBIMENTOS quando
 # reestruturou a aba em 27/08/2026 — isso empurrou TODAS as linhas abaixo 24
@@ -496,6 +501,8 @@ def gerar_painel_html(ws, mes: str) -> str:
         linha_dados = valores[linha - 1] if linha - 1 < len(valores) else []
         return linha_dados[idx_col] if idx_col < len(linha_dados) else ""
 
+    receita_mes = parse_valor_br(valor_em(LINHA_TOTAL_RECEBIMENTOS, idx_atual))
+
     linhas_html = []
     total_budget = 0.0
     total_atual = 0.0
@@ -618,6 +625,8 @@ def gerar_painel_html(ws, mes: str) -> str:
   .item {{ max-width: 100%; }}
   h1 {{ font-size: 1.3rem; margin: 0 0 2px; }}
   .atualizado {{ font-size: 0.8rem; color: var(--text-muted); margin: 0 0 4px; }}
+  .budget-mes {{ font-size: 0.95rem; color: var(--text-secondary); margin: 0 0 4px; }}
+  .budget-mes strong {{ color: var(--text-primary); }}
   .resumo {{ font-size: 0.95rem; color: var(--text-secondary); margin: 0 0 20px; }}
   .resumo strong {{ color: {cor_total}; }}
   .item {{ padding: 10px 0; border-bottom: 1px solid var(--border); }}
@@ -653,6 +662,7 @@ def gerar_painel_html(ws, mes: str) -> str:
 <body>
   <h1>Orçamento de {mes.capitalize()}</h1>
   <p class="atualizado">Atualizado em {atualizado_em}</p>
+  <p class="budget-mes">Budget do mês: <strong>{fmt_brl(receita_mes)}</strong></p>
   <p class="resumo">Total: <strong>{fmt_brl(total_atual)}</strong> de {fmt_brl(total_budget)} previstos ({pct_total:.0f}%)</p>
   <div class="lista">
     {''.join(linhas_html)}
