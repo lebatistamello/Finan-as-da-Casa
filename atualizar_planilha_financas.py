@@ -625,8 +625,8 @@ def gerar_painel_html(ws, mes: str) -> str:
   .item {{ max-width: 100%; }}
   h1 {{ font-size: 1.3rem; margin: 0 0 2px; }}
   .atualizado {{ font-size: 0.8rem; color: var(--text-muted); margin: 0 0 4px; }}
-  .budget-mes {{ font-size: 0.95rem; color: var(--text-secondary); margin: 0 0 4px; }}
-  .budget-mes strong {{ color: var(--text-primary); }}
+  .soma-depositos {{ font-size: 0.95rem; color: var(--text-secondary); margin: 0 0 4px; }}
+  .soma-depositos strong {{ color: var(--text-primary); }}
   .resumo {{ font-size: 0.95rem; color: var(--text-secondary); margin: 0 0 20px; }}
   .resumo strong {{ color: {cor_total}; }}
   .item {{ padding: 10px 0; border-bottom: 1px solid var(--border); }}
@@ -662,7 +662,7 @@ def gerar_painel_html(ws, mes: str) -> str:
 <body>
   <h1>Orçamento de {mes.capitalize()}</h1>
   <p class="atualizado">Atualizado em {atualizado_em}</p>
-  <p class="budget-mes">Budget do mês: <strong>{fmt_brl(receita_mes)}</strong></p>
+  <p class="soma-depositos">Soma dos depósitos: <strong>{fmt_brl(receita_mes)}</strong></p>
   <p class="resumo">Total: <strong>{fmt_brl(total_atual)}</strong> de {fmt_brl(total_budget)} previstos ({pct_total:.0f}%)</p>
   <div class="lista">
     {''.join(linhas_html)}
