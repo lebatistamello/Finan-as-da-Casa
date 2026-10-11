@@ -166,6 +166,7 @@ REGRAS = {
     "Gasolina CRV": ["COMBUSTIVE", "POSTO ", "AUTO POSTO", "ABASTECEDORA",
                       "GAS ZONA SUL", "GASZONASUL"],
     "Seguro CRV": ["VINICIUSGAHBRIEL"],  # corretor do seguro (era da Duster, trocada pela CRV)
+    "Manutenções CRV": ["AUTO CENTRO"],
     "Pedágio/Estacionamento": ["ESTACIONAMENTO", "HORA PARK", "ALLPARK", "ESTAPAR", "ZUL PARK",
                                 "SEM PARAR", "CONECTCAR", "VELOE", "MOVE MAIS", "TAGGY", "PEDAGIO"],
     "Aplicativos/táxi": ["UBER", "99*", "99 "],
