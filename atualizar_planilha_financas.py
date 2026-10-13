@@ -92,6 +92,14 @@ COLUNA_DO_MES = {
 }
 COLUNA_BUDGET = "N"
 
+# Regra permanente da família (fixada em 12/10/2026): o mês orçamentário de
+# cada COMPRA é decidido pela data real da transação, não pelo mês da fatura
+# em que ela aparece — faturas fecham por volta do início do mês e vencem
+# dia 16, então uma fatura "de outubro" carrega majoritariamente compras de
+# setembro. Corte no dia 5: compras de 01 a 05 ainda contam no mês anterior;
+# a partir do dia 06 já contam no mês vigente. Ver mes_orcamentario().
+CORTE_DIA_MES = 5
+
 # Linha do "TOTAL DE RECEBIMENTOS" — usada só pelo painel, pra mostrar a
 # receita do mês (RECEBIMENTOS linhas 1-6: cabeçalho, Depósito Lisandra,
 # Depósito Leandro, Extras Lisandra, Extras Leandro, total).
@@ -207,33 +215,30 @@ MESES_PT = {
     7: "julho", 8: "agosto", 9: "setembro", 10: "outubro", 11: "novembro", 12: "dezembro",
 }
 
-# Abreviações de 3 letras usadas nos nomes de arquivo do app/site do BB
-# (ex.: "OUROCARD_PLATINUM_ESTILO_VISA-Abr_26.pdf").
-MES_ABREV = {
-    "jan": "janeiro", "fev": "fevereiro", "mar": "marco", "abr": "abril",
-    "mai": "maio", "jun": "junho", "jul": "julho", "ago": "agosto",
-    "set": "setembro", "out": "outubro", "nov": "novembro", "dez": "dezembro",
-}
-
-
 def mes_atual() -> str:
     """Retorna o mês corrente em português, no formato usado por COLUNA_DO_MES.
-    Usado pela Routine, que roda sozinha sem ninguém passando --mes na mão."""
+    Usado pelo painel e como mês padrão em testes manuais (--pdf)."""
     return MESES_PT[date.today().month]
 
 
-def mes_do_arquivo(nome_arquivo: str):
-    """Tenta identificar o mês de referência pelo nome do arquivo (ex.:
-    '...-Abr_26.pdf' -> 'abril'). Retorna None se não conseguir identificar,
-    para o chamador decidir o que fazer (cair no mês atual, avisar etc.)."""
-    nome = nome_arquivo.lower()
-    for mes in COLUNA_DO_MES:
-        if mes in nome:
-            return mes
-    for abrev, mes in MES_ABREV.items():
-        if re.search(rf"(?<![a-z]){abrev}(?![a-z])", nome):
-            return mes
-    return None
+def mes_orcamentario(data_lancamento: str) -> str:
+    """Decide a qual mês orçamentário uma COMPRA pertence, a partir da data
+    real do lançamento (formato 'DD/MM', como aparece na fatura) — não do
+    mês da fatura como um todo. Regra fixa da família: corte no dia
+    CORTE_DIA_MES (hoje, 5) — dia 06 em diante já conta no mês vigente."""
+    dia, mes_num = (int(p) for p in data_lancamento.split("/"))
+    if dia <= CORTE_DIA_MES:
+        mes_num -= 1
+        if mes_num == 0:
+            # Virada de ano (compra nos primeiros dias de janeiro cairia em
+            # dezembro do ano ANTERIOR). A planilha só tem o ano corrente,
+            # sem coluna pra dezembro passado — fica em janeiro mesmo, com
+            # aviso. Caso raro: só a 1ª semana de janeiro de cada ano.
+            print(f"[aviso] lançamento de {data_lancamento} cairia em dezembro "
+                  f"do ano anterior pela regra de corte — mantido em janeiro "
+                  f"por limitação da planilha (só tem o ano corrente)")
+            mes_num = 1
+    return MESES_PT[mes_num]
 
 # ============================================================
 # ACESSO AO GOOGLE DRIVE (pasta de faturas)
@@ -306,7 +311,10 @@ def desmarcar_processado(drive_service, file_id: str):
 
 def extrair_lancamentos_de_bytes(pdf_bytes: bytes):
     """Mesma extração de extrair_lancamentos, mas a partir de bytes em memória
-    (útil quando o PDF vem direto do Drive, sem salvar em disco)."""
+    (útil quando o PDF vem direto do Drive, sem salvar em disco). Retorna
+    tuplas (data, descricao, valor) — a data (formato 'DD/MM', como aparece
+    na fatura) é o que permite ratear os lançamentos de UMA fatura entre dois
+    meses orçamentários diferentes (ver mes_orcamentario)."""
     lancamentos = []
     # Sem âncora de fim de linha (nem $): pega o PRIMEIRO valor em R$ depois da
     # descrição, não o último. O layout dessa fatura às vezes emenda duas
@@ -318,26 +326,27 @@ def extrair_lancamentos_de_bytes(pdf_bytes: bytes):
     # quando elas vêm emendadas, ao invés de só reconhecer a primeira e
     # descartar a segunda.
     linha_regex = re.compile(
-        r"(?:^|\s)\d{2}/\d{2}\s+(.+?)\s+(?:BR|[A-Z]{2})?\s*R?\$?\s*(\d{1,3}(?:\.\d{3})*,\d{2})\b"
+        r"(?:^|\s)(\d{2}/\d{2})\s+(.+?)\s+(?:BR|[A-Z]{2})?\s*R?\$?\s*(\d{1,3}(?:\.\d{3})*,\d{2})\b"
     )
     with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
         for page in pdf.pages:
             text = page.extract_text() or ""
             for line in text.split("\n"):
                 for m in linha_regex.finditer(line):
-                    desc = m.group(1).strip()
-                    valor_str = m.group(2).replace(".", "").replace(",", ".")
+                    data = m.group(1)
+                    desc = m.group(2).strip()
+                    valor_str = m.group(3).replace(".", "").replace(",", ".")
                     try:
                         valor = float(valor_str)
                     except ValueError:
                         continue
-                    lancamentos.append((desc, valor))
+                    lancamentos.append((data, desc, valor))
     return lancamentos
 
 
 def extrair_lancamentos(pdf_path: str):
-    """Extrai (descricao, valor) de todas as linhas de lançamento de um PDF
-    local. Mantido para testes manuais com --pdf; o fluxo automático usa
+    """Extrai (data, descricao, valor) de todas as linhas de lançamento de um
+    PDF local. Mantido para testes manuais com --pdf; o fluxo automático usa
     extrair_lancamentos_de_bytes() a partir do Drive."""
     with open(pdf_path, "rb") as f:
         return extrair_lancamentos_de_bytes(f.read())
@@ -356,6 +365,47 @@ def categorizar(descricao: str) -> str:
     if PARCELA_REGEX.search(descricao):
         return ITEM_PARCELAMENTO_GENERICO
     return DEFAULT_ITEM
+
+
+def agrupar_por_mes_orcamentario(lancamentos_com_data):
+    """lancamentos_com_data: lista de (data, descricao, valor), como retornado
+    por extrair_lancamentos(). Retorna ({mes: [(descricao, valor), ...]}, mes_fatura).
+
+    Compra À VISTA: usa a PRÓPRIA data (mes_orcamentario) — é a data real
+    daquela compra. Compra PARCELADA é diferente: a data impressa na fatura
+    é a da compra ORIGINAL (ex.: quando a 1ª parcela foi feita, meses atrás)
+    e se repete FIXA em toda fatura até a última parcela — não dá pra usar
+    essa data pra decidir o mês de cada parcela, senão a parcela cobrada
+    agora cairia sempre no mês da compra original. Em vez disso, toda
+    parcela cai no mês de referência da PRÓPRIA FATURA (mes_fatura),
+    calculado a partir da compra à vista mais recente dela — aproxima bem
+    o fechamento do ciclo de cobrança.
+
+    mes_fatura também é devolvido pra quem grava na planilha: é o único mês
+    que esta fatura "fecha" por inteiro (ela é a única fonte dele), enquanto
+    qualquer outro mês do grupo é só um respingo dos primeiros dias do ciclo
+    — que já foi fechado por uma fatura ANTERIOR, cujo total não pode ser
+    apagado (ver escrever_totais_somando)."""
+    avista = [(d, desc, v) for d, desc, v in lancamentos_com_data if not PARCELA_REGEX.search(desc)]
+    parceladas = [(d, desc, v) for d, desc, v in lancamentos_com_data if PARCELA_REGEX.search(desc)]
+
+    if avista:
+        data_mais_recente = max(
+            avista, key=lambda x: (int(x[0].split("/")[1]), int(x[0].split("/")[0]))
+        )[0]
+        mes_fatura = mes_orcamentario(data_mais_recente)
+    else:
+        mes_fatura = mes_atual()
+        print("[aviso] fatura sem nenhuma compra à vista pra calcular o mês de "
+              f"referência — usando o mês atual ({mes_fatura}) pras parcelas")
+
+    grupos = {}
+    for data, desc, valor in avista:
+        mes = mes_orcamentario(data)
+        grupos.setdefault(mes, []).append((desc, valor))
+    for _, desc, valor in parceladas:
+        grupos.setdefault(mes_fatura, []).append((desc, valor))
+    return grupos, mes_fatura
 
 
 def somar_por_item(lancamentos):
@@ -404,6 +454,44 @@ def escrever_totais(ws, mes: str, totais: dict, dry_run: bool = True):
         print("\nPlanilha atualizada.")
     else:
         print("\n(Rodando em modo simulação — use --escrever para gravar de verdade)")
+
+
+def escrever_totais_somando(ws, mes: str, totais: dict, dry_run: bool = True):
+    """Como escrever_totais, mas SOMA ao valor que já está na célula em vez
+    de sobrescrever. Usado só pro(s) mês(es) de RESPINGO de uma fatura (ver
+    agrupar_por_mes_orcamentario) — aquele mês já foi fechado por inteiro
+    por uma fatura ANTERIOR (a dela mesma, dona do mês, segue usando
+    escrever_totais/sobrescrita normal); apagar esse valor pra colocar só o
+    respingo da fatura atual destruiria o total de verdade do mês anterior.
+
+    Limitação aceita: se a MESMA fatura for reprocessada (ex.: copiada de
+    novo pra corrigir uma regra de categorização, como já fizemos outras
+    vezes neste projeto), o respingo dela seria somado de novo, duplicando
+    o valor. Rodar --resetar-processados ou reprocessar uma fatura já
+    gravada exige corrigir esse respingo manualmente — não é um fluxo
+    automático."""
+    coluna = COLUNA_DO_MES[mes]
+    print(f"\n{'[SIMULAÇÃO] ' if dry_run else ''}Respingo no mês anterior que "
+          f"{'seria somado' if dry_run else 'foi somado'} (coluna {coluna}, "
+          f"acrescentado ao total que uma fatura anterior já fechou):")
+    for item, valor in totais.items():
+        linha = LINHA_DO_ITEM.get(item)
+        if linha is None:
+            print(f"[aviso] item '{item}' sem linha mapeada — pulei")
+            continue
+        cell = f"{coluna}{linha}"
+        if dry_run:
+            print(f"  {cell} += R$ {valor:,.2f} (simulação — não leio o valor atual)")
+            continue
+        atual = parse_valor_br(ws.acell(cell).value)
+        novo = round(atual + valor, 2)
+        ws.update_acell(cell, novo)
+        print(f"  {cell}: {fmt_brl(atual)} + {fmt_brl(valor)} = {fmt_brl(novo)}")
+
+    if dry_run:
+        print("\n(Rodando em modo simulação — use --escrever para gravar de verdade)")
+    else:
+        print("\nPlanilha atualizada.")
 
 
 # ============================================================
@@ -676,38 +764,68 @@ def gerar_painel_html(ws, mes: str) -> str:
 # MAIN
 # ============================================================
 
-def processar_e_escrever(spreadsheet, ws, mes: str, lancamentos, escrever: bool):
-    """Categoriza os lançamentos de UMA fatura, grava (ou simula) os totais
-    na coluna do mês correspondente, e atualiza as abas de detalhamento das
-    categorias "catch-all" (Compras eventuais à vista / Outros parcelamentos)."""
-    print(f"{len(lancamentos)} lançamentos encontrados.")
+def processar_e_escrever(spreadsheet, ws, lancamentos_com_data, escrever: bool,
+                          mes_forcado: str = None):
+    """Categoriza os lançamentos de UMA fatura e grava (ou simula) os totais.
+    Por padrão (mes_forcado=None), cada lançamento vai pro mês orçamentário
+    da SUA PRÓPRIA data (ver mes_orcamentario) — uma fatura normalmente se
+    reparte em 2 meses. Passar mes_forcado força TUDO num único mês, ignorando
+    a data de cada lançamento (usado só por teste manual com --mes).
 
-    totais, nao_categorizados = somar_por_item(lancamentos)
+    As abas de detalhamento (Compras eventuais à vista / Outros parcelamentos)
+    são por categoria, não por mês — processando ambos os grupos na mesma
+    rodada, a aba fica refletindo o ÚLTIMO grupo escrito. Por isso os grupos
+    são processados em ordem cronológica: a aba acaba mostrando o mês mais
+    recente, que é o que normalmente importa pra revisão.
 
-    print("\nTotais por item:")
-    for item, valor in sorted(totais.items(), key=lambda x: -x[1]):
-        print(f"  {item}: R$ {valor:,.2f}")
+    mes_fatura (ver agrupar_por_mes_orcamentario) é o único mês que ESTA
+    fatura fecha por inteiro — grava por sobrescrita normal (escrever_totais),
+    igual sempre foi. Qualquer OUTRO mês do grupo é respingo dos primeiros
+    dias do ciclo, que já pertence a uma fatura ANTERIOR — grava por SOMA
+    (escrever_totais_somando), pra não apagar o total que aquela fatura
+    anterior já fechou."""
+    if mes_forcado:
+        grupos, mes_fatura = {mes_forcado: [(desc, valor) for _, desc, valor in lancamentos_com_data]}, mes_forcado
+    else:
+        grupos, mes_fatura = agrupar_por_mes_orcamentario(lancamentos_com_data)
 
-    if nao_categorizados:
-        print(f"\n[atenção] {len(nao_categorizados)} lançamentos caíram em "
-              f"'{DEFAULT_ITEM}' ou '{ITEM_PARCELAMENTO_GENERICO}' por falta de "
-              f"regra — confira se fazem sentido:")
-        for desc, valor in nao_categorizados[:20]:
-            print(f"  - {desc}: R$ {valor:,.2f}")
+    print(f"{len(lancamentos_com_data)} lançamentos encontrados, "
+          f"repartidos em {len(grupos)} mês(es): {', '.join(grupos)} "
+          f"(mês de referência da fatura: {mes_fatura}).")
 
-    escrever_totais(ws, mes, totais, dry_run=not escrever)
-    escrever_detalhamento(spreadsheet, mes, lancamentos, dry_run=not escrever)
+    for mes in sorted(grupos, key=lambda m: list(COLUNA_DO_MES).index(m)):
+        lancamentos = grupos[mes]
+        print(f"\n=== Mês orçamentário: {mes} ({len(lancamentos)} lançamento(s)) ===")
+
+        totais, nao_categorizados = somar_por_item(lancamentos)
+
+        print("Totais por item:")
+        for item, valor in sorted(totais.items(), key=lambda x: -x[1]):
+            print(f"  {item}: R$ {valor:,.2f}")
+
+        if nao_categorizados:
+            print(f"\n[atenção] {len(nao_categorizados)} lançamentos caíram em "
+                  f"'{DEFAULT_ITEM}' ou '{ITEM_PARCELAMENTO_GENERICO}' por falta de "
+                  f"regra — confira se fazem sentido:")
+            for desc, valor in nao_categorizados[:20]:
+                print(f"  - {desc}: R$ {valor:,.2f}")
+
+        if mes == mes_fatura:
+            escrever_totais(ws, mes, totais, dry_run=not escrever)
+        else:
+            escrever_totais_somando(ws, mes, totais, dry_run=not escrever)
+        escrever_detalhamento(spreadsheet, mes, lancamentos, dry_run=not escrever)
 
 
 def main():
     parser = argparse.ArgumentParser(description="Processa fatura(s) do cartão e atualiza a planilha oficial.")
     parser.add_argument("--pdf", help="Caminho de um PDF local (modo manual/teste)")
     parser.add_argument("--mes", choices=list(COLUNA_DO_MES.keys()), default=None,
-                         help="Mês de referência (ex: agosto). No modo --pdf, se omitido usa o mês "
-                              "atual. No modo automático (pasta do Drive), se omitido cada fatura "
-                              "tem o mês identificado pelo próprio nome do arquivo (ex: "
-                              "'...-Abr_26.pdf' -> abril); passar --mes força esse mês pra TODAS "
-                              "as faturas encontradas na pasta.")
+                         help="Força TODOS os lançamentos pro mês informado (ex: agosto), ignorando "
+                              "a data de cada um. Uso só para teste manual — o padrão (omitir este "
+                              "parâmetro) é o comportamento permanente: cada lançamento vai pro mês "
+                              "da SUA PRÓPRIA data de compra, com corte no dia "
+                              f"{CORTE_DIA_MES} (ver mes_orcamentario).")
     parser.add_argument("--escrever", action="store_true",
                          help="Grava de verdade na planilha (padrão: só simula)")
     parser.add_argument("--resetar-processados", action="store_true",
@@ -758,18 +876,21 @@ def main():
 
     if args.pdf:
         # Modo manual: um PDF local, pra teste
-        mes = args.mes or mes_atual()
-        print(f"Mês de referência: {mes}" + (" (detectado automaticamente)" if not args.mes else ""))
+        if args.mes:
+            print(f"Mês forçado via --mes: {args.mes} (ignorando a data de cada lançamento)")
         pdf_path = Path(args.pdf)
         if not pdf_path.exists():
             sys.exit(f"Arquivo não encontrado: {pdf_path}")
         print(f"Lendo {pdf_path.name} (local)...")
         lancamentos = extrair_lancamentos(str(pdf_path))
-        processar_e_escrever(spreadsheet, ws, mes, lancamentos, args.escrever)
+        processar_e_escrever(spreadsheet, ws, lancamentos, args.escrever, mes_forcado=args.mes)
         return
 
-    # Modo automático: varre a pasta do Drive por PDFs ainda não processados,
-    # cada um gravado no mês que lhe corresponde.
+    # Modo automático: varre a pasta do Drive por PDFs ainda não processados.
+    # Cada lançamento vai pro mês orçamentário da SUA PRÓPRIA data de compra
+    # (processar_e_escrever cuida do rateio) — não existe mais "o mês da
+    # fatura": uma fatura cobre um ciclo de fechamento que normalmente
+    # atravessa 2 meses.
     drive = conectar_drive()
     pdfs_novos = listar_pdfs_novos(drive, DRIVE_FOLDER_ID)
     if not pdfs_novos:
@@ -780,19 +901,10 @@ def main():
         print(f"  - {f['name']}")
 
     for f in pdfs_novos:
-        if args.mes:
-            mes = args.mes
-        else:
-            mes = mes_do_arquivo(f["name"])
-            if mes is None:
-                mes = mes_atual()
-                print(f"\n[aviso] não identifiquei o mês pelo nome de '{f['name']}' "
-                      f"— usando o mês atual ({mes})")
-
-        print(f"\n--- {f['name']} -> mês: {mes} ---")
+        print(f"\n--- {f['name']} ---")
         pdf_bytes = baixar_pdf_drive(drive, f["id"])
         lancamentos = extrair_lancamentos_de_bytes(pdf_bytes)
-        processar_e_escrever(spreadsheet, ws, mes, lancamentos, args.escrever)
+        processar_e_escrever(spreadsheet, ws, lancamentos, args.escrever, mes_forcado=args.mes)
 
         if args.escrever:
             marcar_como_processado(drive, f["id"])
